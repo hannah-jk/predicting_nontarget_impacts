@@ -1,1 +1,46 @@
-# 1. Find parameter settings for KNN
+# 1. KNN. Find settings (k:number of neighbours, and which traits to include) for both hosts and parasitoids
+
+import os
+import pandas as pd
+from my_functions_knn import find_parameters
+
+host_traits = ['Axis_1_h', 'Axis_2_h', 'weight_h', 'host_nd', 'Oct_2010_h', 'Nov_2010_h', 'combined_abundance_h', 'native_or_exotic_h']
+para_traits = ['Axis_1_p', 'Axis_2_p', 'weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p', 'combined_abundance_p']
+
+path_to_scaled_data = "C:/Users/hania/Desktop/analyses/oct1/from_py/scaled_data_for_knn"
+path_results = 'C:/Users/hania/Desktop/analyses/oct1/from_py/parameter_search_knn'
+
+# training data (for the three models: native, plantation, combined)
+data_lupe_combined = pd.read_csv(os.path.join(path_to_scaled_data, 'GP_all_final.csv'))
+data_lupe_pl = pd.read_csv(os.path.join(path_to_scaled_data, 'GP_plantation_final.csv'))
+data_lupe_native = pd.read_csv(os.path.join(path_to_scaled_data, 'GP_native_final.csv'))
+
+# Plantation
+pl_parameters_p = find_parameters(data_lupe_1=data_lupe_pl,
+                                  path_to_results=os.path.join(path_results, 'para/plant_model'),
+                                  user_web_id='para_web_id', item_web_id='lep_web_id', user_traits_1=para_traits)
+  
+pl_parameters = find_parameters(data_lupe_1=data_lupe_pl,
+                                path_to_results=os.path.join(path_results, 'host/plant_model'),
+                                user_web_id='lep_web_id', item_web_id='para_web_id', user_traits_1=host_traits)
+
+# Native
+native_parameters_p = find_parameters(data_lupe_1=data_lupe_native,
+                                      path_to_results=os.path.join(path_results, 'para/native_model'),
+                                      user_web_id='para_web_id', item_web_id='lep_web_id', user_traits_1=para_traits)
+
+native_parameters = find_parameters(data_lupe_1=data_lupe_native,
+                                    path_to_results=os.path.join(path_results, 'host/native_model'),
+                                    user_web_id='lep_web_id', item_web_id='para_web_id', user_traits_1=host_traits)
+
+# Combined
+combined_parameters_p = find_parameters(data_lupe_1=data_lupe_combined,
+                                        path_to_results=os.path.join(path_results, 'para/combined_model'),
+                                        user_web_id='para_web_id', item_web_id='lep_web_id', user_traits_1=para_traits)
+
+combined_parameters = find_parameters(data_lupe_1=data_lupe_combined,
+                                      path_to_results=os.path.join(path_results, 'host/combined_model'),
+                                      user_web_id='lep_web_id', item_web_id='para_web_id', user_traits_1=host_traits)
+# Lep is short for Lepidoptera (which is the host)
+# Training data was collected by Lupe.
+
