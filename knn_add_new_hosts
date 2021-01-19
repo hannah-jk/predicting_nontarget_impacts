@@ -1,0 +1,129 @@
+# 3. KNN. Add new hosts (i.e. hosts only found in the testing data) to the training webs. 
+
+# First, for each host sp in the test data (that is not found in the training data) use KNN to recommend parastioid sp to each of these 
+# hosts, using the k-nearest host neighbours from the training data and the parasitoid species that attack these k neighbours in the 
+# training data. 
+# Second, concat this with the original training data.
+# Note: Lupe's data = training data, Carol's data = testing data. 
+
+import os
+import pandas as pd
+from my_functions2_knn import knn_function_hp
+
+
+def get_unique_host(my_data_test, my_data_train):
+    
+    # subsets my_data_test to just get host species that are unique to the test data (i.e. not found in 'my_data_train')
+    # this function also gets the average species value for some traits ("combined_abundance_h", "host_nd", 'Oct_2010_h', 'Nov_2010_h')
+    # and assigns them to all individuals within a species, so that each species has just one value for each trait. 
+
+    data_test1 = my_data_test.copy(deep=True)
+    data_train1 = my_data_train.copy(deep=True)
+    
+    host_sp_in_train_data = data_train1.lep_web_id.unique().tolist()
+    data_test1 = data_test1[~data_test1['lep_web_id'].isin(host_sp_in_train_data)]  # ~ means get rows not in 'host_sp_in_train_data'
+    
+    dif_average = data_test1[["lep_web_id", "combined_abundance_h", "host_nd", 'Oct_2010_h', 'Nov_2010_h']]
+    dif_average = dif_average.groupby(['lep_web_id'], as_index=False).mean()
+    
+    # combined_abundane_h is at site level. host_nd, Oct_2010_h, Nov_2010_h calculated separately for Carol's native and plantation sites
+    # here we take the average of all these traits (within species, across sites) as we need one value for each trait for each species
+    # (some host species found at more than one site). 
+    
+    data_test1 = data_test1[['lep_web_id', 'Axis_1_h', 'Axis_2_h', 'weight_h', 'native_or_exotic_h']]
+    
+    data_test1 = data_test1.merge(dif_average, how='left', left_on='lep_web_id', right_on='lep_web_id')
+    
+    data_test1['site_ID'] = "test_data_site_all"  # this is so knn_function_hp() works
+    
+    data_test1 = data_test1.drop_duplicates()
+        
+    return(data_test1)
+
+
+def get_all_training_data(new_host_data, training_data, predicted_column, h_threshold):
+    
+    # new_host_data has the predicted h-p interactions for new hosts
+    # training data is the training data (Lupe's data)
+    # predicted_column - pass as string, is the column for new_host_data to use as the predicted interaction frequency
+    
+    new_host_data1 = new_host_data.copy(deep=True)
+    training_data1 = training_data.copy(deep=True)
+    
+    to_merge_training_data = training_data.copy(deep=True)
+    to_merge_training_data = to_merge_training_data[['para_web_id', 'Axis_1_p', 'Axis_2_p', 'weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p', 'combined_abundance_p']]
+    to_merge_training_data = to_merge_training_data.drop_duplicates()
+    
+    new_host_data1 = new_host_data1.rename(columns={'recommended_para' : 'para_web_id', 'host_i' : 'lep_web_id'})
+    new_host_data1 = new_host_data1[['para_web_id', 'lep_web_id', predicted_column]]
+    
+    new_host_data1 = new_host_data1.merge(to_merge_training_data, how='left', left_on='para_web_id', right_on='para_web_id')
+    
+    new_host_data1['interaction_binary'] = new_host_data1[predicted_column].where(new_host_data1[predicted_column] > h_threshold, 0)  # swaps all numbers less than 0.5 with 0
+    new_host_data1['interaction_binary'] = new_host_data1['interaction_binary'].where(new_host_data1['interaction_binary'] < h_threshold, 1)  # swaps all numbers greater than  0.5 with 1
+    new_host_data1 = new_host_data1.rename(columns={predicted_column:'interaction_frequency'})
+    
+    training_data1 = training_data1[['para_web_id', 'lep_web_id', 'interaction_frequency', 'interaction_binary', 'Axis_1_p',
+                                     'Axis_2_p', 'Nov_2010_p', 'Oct_2010_p', 'combined_abundance_p', 'weight_p', 'paras_nd']]
+    
+    all_training_data = pd.concat([new_host_data1, training_data1], sort=True)
+    
+    # return original training data, concatenated with the predicted data for the new host species. 
+    
+    return(all_training_data)
+
+
+best_host_traits = ['Axis_1_h', 'Axis_2_h', 'weight_h', 'native_or_exotic_h', 'host_nd', 'Oct_2010_h', 'Nov_2010_h']
+n_neighbours = 11
+best_host_threshold = 0.19
+
+path_to_scaled_data = 'C:/Users/hania/Desktop/analyses/oct1/from_py/scaled_data_for_knn'
+path_to_output = 'C:/Users/hania/Desktop/analyses/oct1/from_py/training_data_with_new_hosts_added_in'
+
+# training data
+data_lupe_combined = pd.read_csv(os.path.join(path_to_scaled_data, 'GP_all_final.csv'))
+data_lupe_combined = data_lupe_combined[data_lupe_combined.interaction_frequency != 0]  # only use positive interactions to train model
+
+data_lupe_pl = pd.read_csv(os.path.join(path_to_scaled_data, 'GP_plantation_final.csv'))
+data_lupe_pl = data_lupe_pl[data_lupe_pl.interaction_frequency != 0]
+
+data_lupe_native = pd.read_csv(os.path.join(path_to_scaled_data, 'GP_native_final.csv'))
+data_lupe_native = data_lupe_native[data_lupe_native.interaction_frequency != 0]
+
+# data_test
+data_test_for_n = pd.read_csv(os.path.join(path_to_scaled_data, "CF_for_n.csv"))
+data_test_for_pl = pd.read_csv(os.path.join(path_to_scaled_data, "CF_for_pl.csv"))
+data_test_for_c = pd.read_csv(os.path.join(path_to_scaled_data, "CF_for_c.csv"))
+
+# subset Carol's data to just get unique sp (host sp only found in Carol's data)
+data_test_uq_n = get_unique_host(my_data_test=data_test_for_n, my_data_train=data_lupe_native)
+data_test_uq_pl = get_unique_host(my_data_test=data_test_for_pl, my_data_train=data_lupe_pl)
+data_test_uq_combined = get_unique_host(my_data_test=data_test_for_c, my_data_train=data_lupe_combined)
+
+# use function
+new_training_native = knn_function_hp(data_test=data_test_uq_n, data_train=data_lupe_native,
+                                      traits=best_host_traits,
+                                      k=n_neighbours, user_web_id='lep_web_id', item_web_id='para_web_id', for_new_h="yes")
+  
+new_training_plantation = knn_function_hp(data_test=data_test_uq_pl, data_train=data_lupe_pl,
+                                          traits=best_host_traits,
+                                          k=n_neighbours, user_web_id='lep_web_id', item_web_id='para_web_id', for_new_h="yes")
+
+new_training_combined = knn_function_hp(data_test=data_test_uq_combined, data_train=data_lupe_combined,
+                                        traits=best_host_traits,
+                                        k=n_neighbours, user_web_id='lep_web_id', item_web_id='para_web_id', for_new_h="yes")
+# concat to training data
+
+all_training_native = get_all_training_data(new_host_data=new_training_native, training_data=data_lupe_native,
+                                            predicted_column='freq_dist', h_threshold=best_host_threshold)
+
+all_training_plantation = get_all_training_data(new_host_data=new_training_plantation, training_data=data_lupe_pl,
+                                                predicted_column='freq_dist', h_threshold=best_host_threshold)
+
+all_training_combined = get_all_training_data(new_host_data=new_training_combined, training_data=data_lupe_combined,
+                                              predicted_column='freq_dist', h_threshold=best_host_threshold)
+
+# write to csv
+all_training_native.to_csv(os.path.join(path_to_output, 'all_training_native.csv'), index=False)
+all_training_plantation.to_csv(os.path.join(path_to_output, 'all_training_plantation.csv'), index=False)
+all_training_combined.to_csv(os.path.join(path_to_output, 'all_training_combined.csv'), index=False)
