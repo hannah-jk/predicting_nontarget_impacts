@@ -1,1 +1,107 @@
 # 2. KNN. Calculate F1 score for each setting combination to find the best settings (i.e. k and which traits to include)
+
+import math
+import os
+import pandas as pd
+import numpy as np
+from sklearn.metrics import f1_score
+
+path_to_results = 'C:/Users/hania/Desktop/analyses/oct1/from_py/f1_score_parameters_knn'
+path_to_data = 'C:/Users/hania/Desktop/analyses/oct1/from_py/parameter_search_knn'
+
+
+def calculate_metric(mydata, actual_column, predicted_column, csv_name, my_path):
+    
+    # actual_column and predicted_column: name of column in df with actual and predicted values. Pass as string
+    # eg. actual_column='interaction_frequency'
+    # calculates F1
+    
+    df = mydata.copy(deep=True)
+    
+    max_value = df[predicted_column].max()
+    start_value = math.log(0.05, 10) / math.log(10, 10)
+    end_value = math.log(max_value, 10) / math.log(10, 10)
+    n_thresholds = np.logspace(start_value, end_value, 40, endpoint=False, base=10)
+    
+    list_combination = df.param_combination.unique().tolist()
+    
+    final_list_df = [0] * len(list_combination)
+    
+    for i, combination in enumerate(list_combination):
+        
+        df_i = df.copy(deep=True)
+            
+        df_i = df_i[df_i.param_combination == combination]
+        
+        threshold_all = np.zeros(len(n_thresholds)) 
+        metric_all = np.zeros(len(n_thresholds))
+        combination_all = np.zeros(len(n_thresholds))
+            
+        for j, n_threshold in enumerate(n_thresholds):
+        
+            df_j = df_i.copy(deep=True)
+    
+            df_j[predicted_column] = df_j[predicted_column].where(df_j[predicted_column] > n_threshold, 0)  # swaps all numbers less than n_threshold with 0
+            df_j[predicted_column] = df_j[predicted_column].where(df_j[predicted_column] < n_threshold, 1)  # swaps all numbers greater than n_threshold with 1
+                         
+            y_actual = df_j[actual_column].tolist()
+            y_predicted = df_j[predicted_column].tolist()
+            metric_one = f1_score(y_actual, y_predicted)
+            
+            threshold_all[j] = n_threshold
+            metric_all[j] = metric_one  
+            combination_all[j] = combination
+            
+        result_m = pd.DataFrame(list(zip(threshold_all, metric_all, combination_all)), columns=["probability_threshold",
+                                                                                                'metric_value', 'combination_all'])
+            
+        final_list_df[i] = result_m
+        
+    df_all_final = pd.concat(final_list_df)
+    df_all_final.to_csv(os.path.join(my_path, csv_name), index=False)
+    
+    return(df_all_final)
+
+
+# parasitoid
+data_para_n = pd.read_csv(os.path.join(path_to_data, 'para/native_model/parameters_all.csv'))
+data_para_p = pd.read_csv(os.path.join(path_to_data, 'para/plant_model/parameters_all.csv'))
+data_para_c = pd.read_csv(os.path.join(path_to_data, 'para/combined_model/parameters_all.csv'))
+
+# host
+data_host_n = pd.read_csv(os.path.join(path_to_data, 'host/native_model/parameters_all.csv'))
+data_host_p = pd.read_csv(os.path.join(path_to_data, 'host/plant_model/parameters_all.csv'))
+data_host_c = pd.read_csv(os.path.join(path_to_data, 'host/combined_model/parameters_all.csv'))
+
+# parasitoid
+calculate_metric(mydata=data_para_n, actual_column='true_interaction_binary', predicted_column='predicted_interaction_freq',
+                 csv_name='f1_para_native.csv', my_path=path_to_results)
+calculate_metric(mydata=data_para_n, actual_column='true_interaction_binary', predicted_column='predicted_freq_dist',
+                 csv_name='f1_para_native_d.csv', my_path=path_to_results)
+ 
+calculate_metric(mydata=data_para_p, actual_column='true_interaction_binary', predicted_column='predicted_interaction_freq',
+                 csv_name='f1_para_plant.csv', my_path=path_to_results)
+calculate_metric(mydata=data_para_p, actual_column='true_interaction_binary', predicted_column='predicted_freq_dist',
+                 csv_name='f1_para_plant_d.csv', my_path=path_to_results)
+ 
+calculate_metric(mydata=data_para_c, actual_column='true_interaction_binary', predicted_column='predicted_interaction_freq',
+                 csv_name='f1_para_combined.csv', my_path=path_to_results)
+calculate_metric(mydata=data_para_c, actual_column='true_interaction_binary', predicted_column='predicted_freq_dist',
+                 csv_name='f1_para_combined_d.csv', my_path=path_to_results)
+ 
+# host
+calculate_metric(mydata=data_host_n, actual_column='true_interaction_binary', predicted_column='predicted_interaction_freq',
+                 csv_name='f1_host_native.csv', my_path=path_to_results)
+calculate_metric(mydata=data_host_n, actual_column='true_interaction_binary', predicted_column='predicted_freq_dist',
+                 csv_name='f1_host_native_d.csv', my_path=path_to_results)
+ 
+calculate_metric(mydata=data_host_p, actual_column='true_interaction_binary', predicted_column='predicted_interaction_freq',
+                 csv_name='f1_host_plant.csv', my_path=path_to_results)
+calculate_metric(mydata=data_host_p, actual_column='true_interaction_binary', predicted_column='predicted_freq_dist',
+                 csv_name='f1_host_plant_d.csv', my_path=path_to_results)
+
+calculate_metric(mydata=data_host_c, actual_column='true_interaction_binary', predicted_column='predicted_interaction_freq',
+                 csv_name='f1_host_combined.csv', my_path=path_to_results)
+
+calculate_metric(mydata=data_host_c, actual_column='true_interaction_binary', predicted_column='predicted_freq_dist',
+                 csv_name='f1_host_combined_d.csv', my_path=path_to_results)
