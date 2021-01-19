@@ -1,0 +1,89 @@
+# 5. KNN. Calculate metrics for KNN models
+
+import os
+import numpy as np
+import pandas as pd
+from sklearn.metrics import f1_score, accuracy_score, recall_score, precision_score, confusion_matrix
+
+
+def knn_metric(my_data1, actual_column, predicted_column, path_to_results, csv_name, n_threshold):
+    
+    my_data = my_data1.copy(deep=True)
+    
+    sites = my_data.site_id.unique().tolist()
+
+    flscore_all = np.zeros(len(sites))
+    accuracy_all = np.zeros(len(sites))
+    recall_all = np.zeros(len(sites))
+    precision_all = np.zeros(len(sites))
+    
+    tn_all = np.zeros(len(sites))
+    tp_all = np.zeros(len(sites))
+    fp_all = np.zeros(len(sites))
+    fn_all = np.zeros(len(sites))
+    
+    for i, site in enumerate(sites):
+        
+        data_one_site = my_data.copy(deep=True)
+        
+        data_one_site = data_one_site[data_one_site.site_id == site]
+        
+        data_one_site = data_one_site.copy(deep=True)  # must have this otherwise .where doesn't work for some reason. 
+        
+        # convert 'predicted_column' to binary values
+        
+        data_one_site[predicted_column] = data_one_site[predicted_column].where(data_one_site[predicted_column] > n_threshold, 0)  # swaps all numbers less than n_threshold with 0
+        data_one_site[predicted_column] = data_one_site[predicted_column].where(data_one_site[predicted_column] < n_threshold, 1)
+                
+        y_actual = data_one_site[actual_column].tolist()
+        y_predicted = data_one_site[predicted_column].tolist()
+        
+        f1score_one = f1_score(y_actual, y_predicted)
+        flscore_all[i] = f1score_one
+        
+        accuracy = accuracy_score(y_actual, y_predicted)
+        accuracy_all[i] = accuracy
+        
+        recall = recall_score(y_actual, y_predicted)
+        recall_all[i] = recall
+        
+        precision = precision_score(y_actual, y_predicted)
+        precision_all[i] = precision
+        
+        tn, fp, fn, tp = confusion_matrix(y_actual, y_predicted, labels=[0, 1]).ravel()
+        tn_all[i] = tn
+        fp_all[i] = fp
+        fn_all[i] = fn
+        tp_all[i] = tp
+    
+    df_return = pd.DataFrame()
+    df_return['accuracy'] = accuracy_all
+    df_return['f1_score'] = flscore_all
+    df_return['recall'] = recall_all
+    df_return['precision'] = precision_all
+    
+    df_return['tn'] = tn_all 
+    df_return['fp'] = fp_all 
+    df_return['fn'] = fn_all 
+    df_return['tp'] = tp_all
+    
+    df_return['site_id'] = sites
+        
+    df_return.to_csv(os.path.join(path_to_results, csv_name), index=False)
+    
+
+path_to_data = "C:/Users/hania/Desktop/analyses/oct1/from_py/results_knn"
+path_to_results_knn = "C:/Users/hania/Desktop/analyses/oct1/from_py/knn_metrics_from_py"
+
+knn_predicted_plantation = pd.read_csv(os.path.join(path_to_data, 'r_pl_final_best.csv'))
+knn_predicted_native = pd.read_csv(os.path.join(path_to_data, 'r_native_final_best.csv'))
+knn_predicted_combined = pd.read_csv(os.path.join(path_to_data, 'r_combined_final_best.csv'))
+
+knn_metric(my_data1=knn_predicted_plantation, actual_column='true_binary', predicted_column='predicted_frequency_w',
+           path_to_results=path_to_results_knn, csv_name='knn_metric_pl.csv', n_threshold=0.14)
+
+knn_metric(my_data1=knn_predicted_native, actual_column='true_binary', predicted_column='predicted_frequency_w',
+           path_to_results=path_to_results_knn, csv_name='knn_metric_native.csv', n_threshold=0.14)
+
+knn_metric(my_data1=knn_predicted_combined, actual_column='true_binary', predicted_column='predicted_frequency_w',
+           path_to_results=path_to_results_knn, csv_name='knn_metric_combined.csv', n_threshold=0.14)
