@@ -1,0 +1,114 @@
+# 4. KNN models
+
+import os
+import pandas as pd
+from sklearn.metrics import f1_score
+from my_functions2_knn import knn_function_hp
+
+
+def rename_columns(my_df):
+    
+    my_df1 = my_df.copy(deep=True)
+    my_df1 = my_df1.rename(columns={'average_freq': 'predicted_frequency', 'binary_dist':'predicted_binary_w',
+                                    'freq_dist':'predicted_frequency_w',
+                                    'proportion_of_neighbours_that_attack_host':'predicted_binary'})
+    return(my_df1)
+
+
+def calculate_metric(mydata, actual_column, predicted_column, n_threshold_1):
+    
+    # actual_column and predicted_column name of column in df with actual and predicted values. Pass as string
+    # eg. actual_column='interaction_frequency'
+    # calculates F1
+    
+    df = mydata.copy(deep=True)
+    
+    df[predicted_column] = df[predicted_column].where(df[predicted_column] > n_threshold_1, 0)  
+    # swaps all numbers less than n_threshold with 0
+    df[predicted_column] = df[predicted_column].where(df[predicted_column] < n_threshold_1, 1)  
+    # swaps all numbers greater than n_threshold with 1
+                 
+    y_actual = df[actual_column].tolist()
+    y_predicted = df[predicted_column].tolist()
+    metric_one = f1_score(y_actual, y_predicted)
+                
+    print('The f1 score is', metric_one) 
+        
+    return(metric_one)
+
+
+path_to_training_data = 'C:/Users/hania/Desktop/analyses/oct1/from_py/training_data_with_new_hosts_added_in'
+path_to_file_Carol = "C:/Users/hania/Desktop/analyses/oct1/from_py/scaled_data_for_knn"
+path_to_results = 'C:/Users/hania/Desktop/analyses/oct1/from_py/results_knn'
+
+# the best parameters as indicated by the parameter search 
+best_para_traits = ['weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p', 'combined_abundance_p']
+best_para_k = 13
+para_threshold_best = 0.14
+
+# training data
+data_lupe_combined = pd.read_csv(os.path.join(path_to_training_data, 'all_training_combined.csv'))
+data_lupe_combined = data_lupe_combined[data_lupe_combined.interaction_frequency != 0]
+
+data_lupe_pl = pd.read_csv(os.path.join(path_to_training_data, 'all_training_plantation.csv'))
+data_lupe_pl = data_lupe_pl[data_lupe_pl.interaction_frequency != 0]
+
+data_lupe_native = pd.read_csv(os.path.join(path_to_training_data, 'all_training_native.csv'))
+data_lupe_native = data_lupe_native[data_lupe_native.interaction_frequency != 0]
+
+# data_test
+data_test_for_n = pd.read_csv(os.path.join(path_to_file_Carol, "CF_for_n.csv"))
+data_test_for_pl = pd.read_csv(os.path.join(path_to_file_Carol, "CF_for_pl.csv"))
+data_test_for_c = pd.read_csv(os.path.join(path_to_file_Carol, "CF_for_c.csv"))
+
+data_test_to_merge = data_test_for_n.copy(deep=True)
+data_test_to_merge = data_test_to_merge[["para_web_id", "lep_web_id", "site_ID", "interaction_frequency", "interaction_binary"]]
+data_test_to_merge = data_test_to_merge.rename(columns={"para_web_id":"parasitoid_i", "lep_web_id":"recommended_host",
+                                                        "site_ID":"site_id", "interaction_frequency":"true_frequency",
+                                                        "interaction_binary":"true_binary"})
+
+# KNN Combined (best parameters)
+r_combined_para = knn_function_hp(data_test=data_test_for_c, data_train=data_lupe_combined, traits=best_para_traits,
+                                  k=best_para_k, user_web_id='para_web_id', item_web_id='lep_web_id', for_new_h="no")
+
+r_combined_para = rename_columns(r_combined_para)
+
+r_combined_para = pd.merge(r_combined_para, data_test_to_merge, how='outer', on=['recommended_host', 'parasitoid_i', 'site_id'])
+r_combined_para.fillna(0, inplace=True)
+
+r_combined_para.to_csv(os.path.join(path_to_results, 'r_combined_final_best.csv'), index=False)
+
+# KNN (plantation, best parameters)
+
+r_pl_para = knn_function_hp(data_test=data_test_for_pl, data_train=data_lupe_pl,
+                            traits=best_para_traits,
+                            k=best_para_k, user_web_id='para_web_id', item_web_id='lep_web_id', for_new_h="no")
+
+r_pl_para = rename_columns(r_pl_para)
+
+r_pl_para = pd.merge(r_pl_para, data_test_to_merge, how='outer', on=['recommended_host', 'parasitoid_i', 'site_id'])
+r_pl_para.fillna(0, inplace=True)
+
+r_pl_para.to_csv(os.path.join(path_to_results, 'r_pl_final_best.csv'), index=False)
+
+# KNN Native (best parameters)
+r_native_para = knn_function_hp(data_test=data_test_for_n, data_train=data_lupe_native, traits=best_para_traits,
+                                k=best_para_k, user_web_id='para_web_id', item_web_id='lep_web_id', for_new_h="no")
+
+r_native_para = rename_columns(r_native_para)
+
+r_native_para = pd.merge(r_native_para, data_test_to_merge, how='outer', on=['recommended_host', 'parasitoid_i', 'site_id'])
+r_native_para.fillna(0, inplace=True)
+
+r_native_para.to_csv(os.path.join(path_to_results, 'r_native_final_best.csv'), index=False)
+
+# calculate metrics
+
+combined_best_f1 = calculate_metric(mydata=r_combined_para, actual_column='true_binary', predicted_column='predicted_frequency_w',
+                                    n_threshold_1=para_threshold_best)
+
+pl_best_f1 = calculate_metric(mydata=r_pl_para, actual_column='true_binary', predicted_column='predicted_frequency_w',
+                              n_threshold_1=para_threshold_best)
+
+native_best_f1 = calculate_metric(mydata=r_native_para, actual_column='true_binary', predicted_column='predicted_frequency_w',
+                                  n_threshold_1=para_threshold_best)
