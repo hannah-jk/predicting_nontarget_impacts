@@ -1,0 +1,134 @@
+# metrics (KNN)
+
+library(multcomp)
+library(stringr)
+
+overdisp_fun_1 <- function(model) {
+  rdf <- df.residual(model)
+  rp <- residuals(model,type="pearson")
+  Pearson.chisq <- sum(rp^2)
+  prat <- Pearson.chisq/rdf
+  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE)
+  c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)
+}
+
+# from: https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html#testing-for-overdispersioncomputing-overdispersion-factor
+
+# read in data and format ----
+
+setwd("C:/Users/hania/Desktop/analyses/oct1/from_py/knn_metrics_from_py")
+
+data_a <- read.table("knn_metric_combined.csv",header=T,row.names=NULL,sep=",", stringsAsFactors = FALSE)
+data_n <- read.table("knn_metric_native.csv",header=T,row.names=NULL,sep=",", stringsAsFactors = FALSE)
+data_p <- read.table("knn_metric_pl.csv",header=T,row.names=NULL,sep=",", stringsAsFactors = FALSE)
+
+# creates new column by taking the last letter from sites (eg. 47_EC_N becomes N)
+data_a$forest_id <- str_sub(data_a$site_id, -1) 
+data_n$forest_id <- str_sub(data_n$site_id, -1)
+data_p$forest_id <- str_sub(data_p$site_id, -1)
+
+data_a$model_id <- rep("Both", nrow(data_a))
+data_n$model_id <- rep("Native", nrow(data_n))
+data_p$model_id <- rep("Plantation", nrow(data_p))
+
+data_CF <- rbind(data_a, data_n)
+data_CF <- rbind(data_CF, data_p)
+
+data_CF$site_id <- ifelse(nchar(data_CF$site_id)==6, paste0("0", data_CF$site_id), data_CF$site_id)
+# adds 0 to start (if length = 6). For example: 7_EC_N to 07_EC_N
+
+data_CF$block <- str_sub(data_CF$site_id, 1, 2) # takes first two characters from string
+
+data_CF$number_right <- data_CF$tn + data_CF$tp
+data_CF$number_wrong <- data_CF$fn + data_CF$fp
+
+data_CF$ob <- c(1:nrow(data_CF))
+data_CF$ob <- as.factor(data_CF$ob)
+
+data_m <- data_CF[, c("accuracy", "f1_score", "recall", "precision", "forest_id", "model_id")]
+
+data_m <- aggregate(.~ forest_id+model_id, data_m, mean)
+
+# F1 score ----
+
+data_CF$model_id <- as.factor(data_CF$model_id)
+m_f1 <- lmer(f1_score ~ model_id*forest_id + (1|site_id), data=data_CF)
+
+hist(residuals(m_f1))
+qqnorm(residuals(m_f1))
+plot(fitted(m_f1),residuals(m_f1))
+
+m_f1_b <- glm(f1_score ~ model_id*forest_id, data=data_CF)
+AIC(m_f1, m_f1_b) # m_f1_b best
+
+m_f1_from_dredge <- dredge(m_f1_b, rank="AIC")
+print(m_f1_from_dredge)
+m_f1_best <- lm(f1_score ~ model_id, data=data_CF)
+
+AIC(m_f1_best)
+r.squaredGLMM(m_f1_best)
+summary(m_f1_best)
+
+qqnorm(residuals(m_f1_best))
+plot(fitted(m_f1_best),residuals(m_f1_best))
+
+summary(glht(m_f1_best, linfct=mcp(model_id="Tukey")))
+
+# accuracy ----
+
+y_accur <- cbind(data_CF$number_right, data_CF$number_wrong)
+
+m_accuracy_1 <- glmer(y_accur ~ model_id*forest_id + (1|site_id), data=data_CF, family=binomial)
+overdisp_fun_1(m_accuracy_1)
+m_accuracy_b <- glm(y_accur ~ model_id*forest_id, data=data_CF, family=binomial)
+AIC(m_accuracy_1, m_accuracy_b) # m_accuracy_1 is better. 
+
+m_accuracy_from_dredge <- dredge(m_accuracy_1, rank="AIC")
+print(m_accuracy_from_dredge)
+m_accuracy_best <- glmer(y_accur ~ forest_id + model_id + (1|site_id), data=data_CF, family=binomial)
+
+AIC(m_accuracy_best)
+r.squaredGLMM(m_accuracy_best)
+summary(m_accuracy_best)
+
+overdisp_fun_1(m_accuracy_best)
+summary(glht(m_accuracy_best, mcp(model_id="Tukey")))
+summary(glht(m_accuracy_best, mcp(forest_id="Tukey")))
+
+# recall ----
+
+y_recall <- cbind(data_CF$tp, data_CF$fn)
+m_recall <- glmer(y_recall ~ model_id*forest_id + (1|site_id), data=data_CF, family=binomial)
+m_recall_b <- glm(y_recall ~ model_id*forest_id, data=data_CF, family=binomial)
+AIC(m_recall, m_recall_b) # m_recall_b best
+
+m_recall_from_dredge <- dredge(m_recall_b, rank="AIC")
+print(m_recall_from_dredge)
+
+m_recall_best <- glm(y_recall ~ model_id, data=data_CF, family=binomial)
+
+AIC(m_recall_best)
+r.squaredGLMM(m_recall_best)
+summary(m_recall_best)
+overdisp_fun_1(m_recall_best)
+
+summary(glht(m_recall_best, mcp(model_id="Tukey")))
+
+# precision ----
+
+y_precision <- cbind(data_CF$tp, data_CF$fp)
+
+m_precision <- glmer(y_precision ~ model_id*forest_id + (1|site_id), data=data_CF, family=binomial)
+m_precision_b <- glm(y_precision ~ model_id*forest_id, data=data_CF, family=binomial)
+
+AIC(m_precision, m_precision_b) # m_precision_b better.
+
+m_precision_from_dredge <- dredge(m_precision_b, rank="AIC")
+print(m_precision_from_dredge)
+
+m_precision_best <- glm(y_precision ~ 1, data=data_CF, family=binomial)
+
+AIC(m_precision_best)
+r.squaredGLMM(m_precision_best)
+summary(m_precision_best)
+overdisp_fun_1(m_precision_best)
