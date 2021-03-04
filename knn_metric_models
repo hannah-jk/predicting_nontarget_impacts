@@ -1,22 +1,23 @@
 # metrics (KNN)
 
+rm(list=ls(all.names = TRUE)) # clears environment
+cat("\014") # clears console
+
+# packages ----
+
 library(multcomp)
 library(stringr)
+library(lme4)
+library(MuMIn)
 
-overdisp_fun_1 <- function(model) {
-  rdf <- df.residual(model)
-  rp <- residuals(model,type="pearson")
-  Pearson.chisq <- sum(rp^2)
-  prat <- Pearson.chisq/rdf
-  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE)
-  c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)
-}
+source("C:/Users/hania/Desktop/project/r_functions/over_dispersion_function.R")
+source("C:/Users/hania/Desktop/project/r_functions/Bolker_etal_2009_Tree_sm/mmc3.R")
 
-# from: https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html#testing-for-overdispersioncomputing-overdispersion-factor
+options(na.action = "na.fail")
 
 # read in data and format ----
 
-setwd("C:/Users/hania/Desktop/analyses/oct1/from_py/knn_metrics_from_py")
+setwd("C:/Users/hania/Desktop/rf_no_abundance/from_py/knn_metrics_from_py")
 
 data_a <- read.table("knn_metric_combined.csv",header=T,row.names=NULL,sep=",", stringsAsFactors = FALSE)
 data_n <- read.table("knn_metric_native.csv",header=T,row.names=NULL,sep=",", stringsAsFactors = FALSE)
@@ -63,7 +64,7 @@ AIC(m_f1, m_f1_b) # m_f1_b best
 
 m_f1_from_dredge <- dredge(m_f1_b, rank="AIC")
 print(m_f1_from_dredge)
-m_f1_best <- lm(f1_score ~ model_id, data=data_CF)
+m_f1_best <- lm(f1_score ~ 1, data=data_CF)
 
 AIC(m_f1_best)
 r.squaredGLMM(m_f1_best)
@@ -71,8 +72,6 @@ summary(m_f1_best)
 
 qqnorm(residuals(m_f1_best))
 plot(fitted(m_f1_best),residuals(m_f1_best))
-
-summary(glht(m_f1_best, linfct=mcp(model_id="Tukey")))
 
 # accuracy ----
 
@@ -91,7 +90,7 @@ AIC(m_accuracy_best)
 r.squaredGLMM(m_accuracy_best)
 summary(m_accuracy_best)
 
-overdisp_fun_1(m_accuracy_best)
+overdisp_fun(m_accuracy_best)
 summary(glht(m_accuracy_best, mcp(model_id="Tukey")))
 summary(glht(m_accuracy_best, mcp(forest_id="Tukey")))
 
