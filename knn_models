@@ -37,13 +37,16 @@ def calculate_metric(mydata, actual_column, predicted_column, n_threshold_1):
     return(metric_one)
 
 
-path_to_training_data = 'C:/Users/hania/Desktop/analyses/oct1/from_py/training_data_with_new_hosts_added_in'
+pd.options.display.max_columns = 50
+pd.set_option('display.width', 200)
+
+path_to_training_data = 'C:/Users/hania/Desktop/rf_no_abundance/from_py/training_data_with_new_hosts_added_in'
 path_to_file_Carol = "C:/Users/hania/Desktop/analyses/oct1/from_py/scaled_data_for_knn"
-path_to_results = 'C:/Users/hania/Desktop/analyses/oct1/from_py/results_knn'
+path_to_results = 'C:/Users/hania/Desktop/rf_no_abundance/from_py/results_knn'
 
 # the best parameters as indicated by the parameter search 
-best_para_traits = ['weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p', 'combined_abundance_p']
-best_para_k = 13
+best_para_traits = ['weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p']
+best_para_k = 12
 para_threshold_best = 0.14
 
 # training data
@@ -112,3 +115,4 @@ pl_best_f1 = calculate_metric(mydata=r_pl_para, actual_column='true_binary', pre
 
 native_best_f1 = calculate_metric(mydata=r_native_para, actual_column='true_binary', predicted_column='predicted_frequency_w',
                                   n_threshold_1=para_threshold_best)
+
