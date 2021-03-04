@@ -4,11 +4,11 @@ import os
 import pandas as pd
 from my_functions_knn import find_parameters
 
-host_traits = ['Axis_1_h', 'Axis_2_h', 'weight_h', 'host_nd', 'Oct_2010_h', 'Nov_2010_h', 'combined_abundance_h', 'native_or_exotic_h']
-para_traits = ['Axis_1_p', 'Axis_2_p', 'weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p', 'combined_abundance_p']
+host_traits = ['Axis_1_h', 'Axis_2_h', 'weight_h', 'host_nd', 'Oct_2010_h', 'Nov_2010_h', 'native_or_exotic_h']
+para_traits = ['Axis_1_p', 'Axis_2_p', 'weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p']
 
 path_to_scaled_data = "C:/Users/hania/Desktop/analyses/oct1/from_py/scaled_data_for_knn"
-path_results = 'C:/Users/hania/Desktop/analyses/oct1/from_py/parameter_search_knn'
+path_results = 'C:/Users/hania/Desktop/rf_no_abundance/from_py/parameter_search_knn'
 
 # training data (for the three models: native, plantation, combined)
 data_lupe_combined = pd.read_csv(os.path.join(path_to_scaled_data, 'GP_all_final.csv'))
