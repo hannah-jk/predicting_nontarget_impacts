@@ -72,8 +72,8 @@ def knn_metric(my_data1, actual_column, predicted_column, path_to_results, csv_n
     df_return.to_csv(os.path.join(path_to_results, csv_name), index=False)
     
 
-path_to_data = "C:/Users/hania/Desktop/analyses/oct1/from_py/results_knn"
-path_to_results_knn = "C:/Users/hania/Desktop/analyses/oct1/from_py/knn_metrics_from_py"
+path_to_data = "C:/Users/hania/Desktop/rf_no_abundance/from_py/results_knn"
+path_to_results_knn = "C:/Users/hania/Desktop/rf_no_abundance/from_py/knn_metrics_from_py"
 
 knn_predicted_plantation = pd.read_csv(os.path.join(path_to_data, 'r_pl_final_best.csv'))
 knn_predicted_native = pd.read_csv(os.path.join(path_to_data, 'r_native_final_best.csv'))
