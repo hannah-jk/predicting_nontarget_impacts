@@ -1,4 +1,169 @@
 # KNN (plantation model)
 
+rm(list=ls(all.names = TRUE))
+cat("\014")
 
+# packages ----
+
+library(lme4)
+library(dplyr)
+library(stringr)
+library(data.table)
+library(MuMIn)
+data.table::dcast
+
+source("C:/Users/hania/Desktop/analyses/ms_thesis/code/linear_models/functions_linear_models.R")
+source("C:/Users/hania/Desktop/project/r_functions/over_dispersion_function.R")
+source("C:/Users/hania/Desktop/rf_no_abundance/r_code/random_effects.R")
+source("C:/Users/hania/Desktop/rf_no_abundance/r_code/figures/figure_functions.R")
+
+merge_generality <- function(data_predictions, n_data_trait, e_data_trait){
+  
+  # this merges host & parasitoid generality to the df
+  
+  # n (native)
+  n_data_p <- n_data_trait[ , c("paras_web_ID", "forest_id", "paras_nd_np")]
+  n_data_p <- distinct(n_data_p)
+  df <- merge(data_predictions, n_data_p, by=c("paras_web_ID", "forest_id"), all.x=TRUE)
+  
+  n_data_h <- n_data_trait[ , c("Lep_web_ID", "forest_id", "host_nd_np")]
+  n_data_h <- distinct(n_data_h)
+  df <- merge(df, n_data_h, by=c("Lep_web_ID", "forest_id"), all.x=TRUE)
+  
+  # e (exotic/plantation)
+  e_data_p <- e_data_trait[ , c("paras_web_ID", "forest_id", "paras_nd_e")]
+  e_data_p <- distinct(e_data_p)
+  df <- merge(df, e_data_p, by=c("paras_web_ID", "forest_id"), all.x=TRUE)
+  
+  e_data_h <- e_data_trait[ , c("Lep_web_ID", "forest_id", "host_nd_e")]
+  e_data_h <- distinct(e_data_h)
+  df <- merge(df, e_data_h, by=c("Lep_web_ID", "forest_id"), all.x=TRUE)
+  
+  df[is.na(df)] <- 0
+  
+  df$host_nd <- df$host_nd_np + df$host_nd_e
+  df$paras_nd <- df$paras_nd_np + df$paras_nd_e
+  
+  df <- df[ , !names(df) %in% c("paras_nd_np", "paras_nd_e", "host_nd_np", "host_nd_e")]
+  
+  return(df)
+}
+
+# read in data ----
+
+setwd("C:/Users/hania/Desktop/rf_no_abundance/from_py/results_knn")
+predictions <- read.csv("r_pl_final_best.csv", stringsAsFactors = FALSE)
+
+setwd("C:/Users/hania/Desktop/analyses/oct1/from_r")
+data_traits_CF_n <- read.csv("CF_native_final.csv", stringsAsFactors = FALSE)
+data_traits_CF_e <- read.csv("CF_plantation_final.csv", stringsAsFactors = FALSE)
+
+data_abundance_n <- data_traits_CF_n[,c("paras_web_ID", "Lep_web_ID", "site_ID", "combined_abundance_h", 
+                                        "combined_abundance_p")]
+data_abundance_e <- data_traits_CF_e[,c("paras_web_ID", "Lep_web_ID", "site_ID", "combined_abundance_h", 
+                                        "combined_abundance_p")]
+data_abundance <- rbind(data_abundance_n, data_abundance_e)
+
+# nd ----
+
+predictions$forest_id <- str_sub(predictions$site_id, -1)
+data_traits_CF_n$forest_id <- str_sub(data_traits_CF_n$site_ID, -1)
+data_traits_CF_e$forest_id <- str_sub(data_traits_CF_e$site_ID, -1)
+
+colnames(predictions)[colnames(predictions)=="parasitoid_i"] <- "paras_web_ID"
+colnames(predictions)[colnames(predictions)=="recommended_host"] <- "Lep_web_ID"
+
+predictions <- merge_generality(data_predictions=predictions, n_data_trait=data_traits_CF_n, 
+                                e_data_trait=data_traits_CF_e)
+
+predictions$predicted_frequency_01 <- ifelse(predictions$predicted_frequency>0, 1, 0)
+
+predictions$prediction_wr <- ifelse(predictions$true_binary==predictions$predicted_frequency_01, "right", "wrong")
+
+predictions$h_p <- paste(predictions$Lep_web_ID, predictions$paras_web_ID, sep="_")
+
+# scale ----
+
+data_abundance$site_ID <- ifelse(nchar(data_abundance$site_ID)==6, 
+                                 paste("0", data_abundance$site_ID, sep=""), 
+                                 data_abundance$site_ID)
+
+predictions <- merge(predictions, data_abundance, by.x=c('Lep_web_ID', 'paras_web_ID', 'site_id'), 
+                     by.y=c('Lep_web_ID', 'paras_web_ID', 'site_ID'), all.x=TRUE)
+sum(is.na(predictions))
+
+predictions <- scale_some_variables_knn(mydata=predictions)
+
+colnames(predictions)[colnames(predictions)=="site_id"] <- "name_site_id"
+colnames(predictions)[colnames(predictions)=="true_frequency"] <- "true_interaction_freq"
+
+options(na.action = "na.fail")
+
+# model 1 ----
+
+m1 <- glmer(prediction_wr ~  host_nd_sc*paras_nd_sc + host_abundance_sc*para_abundance_sc*forest_id + (1|name_site_id) + 
+              (1|h_p), data=predictions, family=binomial, control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+re_binary_knn(mymodel=m1) # m1_a
+
+m1_a <- glmer(prediction_wr ~  host_nd_sc*paras_nd_sc + host_abundance_sc*para_abundance_sc*forest_id + 
+                (1|h_p), data=predictions, family=binomial, control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+m1_from_dredge <- dredge(m1_a, rank="AIC")
+# write.csv(m1_from_dredge, "C:/Users/hania/Desktop/rf_no_abundance/from_r/model_selection/m1_from_dredge_knn_pl.csv",
+#           row.names=FALSE)
+print(m1_from_dredge)
+
+m1_best <- glmer(prediction_wr ~ host_abundance_sc*para_abundance_sc + paras_nd_sc + (1|h_p), data=predictions, 
+                 family=binomial, control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+print_metrics(my_model=m1_best)
+
+# model 2 ----
+
+predictions$ob <- seq(1, nrow(predictions))
+
+m2 <- glmer(true_interaction_freq ~ predicted_frequency_sc*paras_nd_sc*host_nd_sc + 
+               forest_id*predicted_frequency_sc*para_abundance_sc*host_abundance_sc + (1|name_site_id) +
+              (predicted_frequency_sc|paras_web_ID), data=predictions, family=poisson, 
+            control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+re_frequency_knn(mymodel=m2) # model e best
+
+m2_e <- glm(true_interaction_freq ~ predicted_frequency_sc*paras_nd_sc*host_nd_sc + 
+               forest_id*predicted_frequency_sc*para_abundance_sc*host_abundance_sc, data=predictions, family=poisson)
+
+m2_from_dredge <- dredge(m2_e, rank="AIC")
+# write.csv(m2_from_dredge, "C:/Users/hania/Desktop/rf_no_abundance/from_r/model_selection/m2_from_dredge_knn_pl.csv",
+#           row.names=FALSE)
+print(m2_from_dredge)
+
+m2_best <- glm(true_interaction_freq ~ host_nd_sc + forest_id*host_abundance_sc*para_abundance_sc + 
+                 host_abundance_sc*para_abundance_sc*predicted_frequency_sc, family=poisson, data=predictions)
+print_metrics(my_model=m2_best)
+
+m2_best_without <- glm(true_interaction_freq ~ host_nd_sc + forest_id + predicted_frequency_sc, family=poisson, 
+                       data=predictions)
+knn_pl_figure <- plot_3d_abund(m_without=m2_best_without, mydata=predictions, n=45)
+
+# model 3 (compare) ----
+
+m3 <- glmer(true_interaction_freq ~ predicted_frequency_sc + (1|name_site_id) + 
+              (predicted_frequency_sc|paras_web_ID), data=predictions, 
+            family=poisson, control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+random_effect_options_compare_knn(mydata=predictions) # m3_a
+
+m3_a <- glmer(true_interaction_freq ~ predicted_frequency_sc + 
+                (predicted_frequency_sc|paras_web_ID), data=predictions, 
+              family=poisson, control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+m3_from_dredge <- dredge(m3_a, rank="AIC")
+print(m3_from_dredge)
+
+m3_best <- glmer(true_interaction_freq ~ (predicted_frequency_sc|paras_web_ID), data=predictions, 
+                 family=poisson, control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+print_metrics(my_model=m3_best)
+summary(m3_best)
 
