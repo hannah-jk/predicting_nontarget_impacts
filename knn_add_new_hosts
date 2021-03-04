@@ -23,7 +23,7 @@ def get_unique_host(my_data_test, my_data_train):
     host_sp_in_train_data = data_train1.lep_web_id.unique().tolist()
     data_test1 = data_test1[~data_test1['lep_web_id'].isin(host_sp_in_train_data)]  # ~ means get rows not in 'host_sp_in_train_data'
     
-    dif_average = data_test1[["lep_web_id", "combined_abundance_h", "host_nd", 'Oct_2010_h', 'Nov_2010_h']]
+    dif_average = data_test1[["lep_web_id", "host_nd", 'Oct_2010_h', 'Nov_2010_h']]
     dif_average = dif_average.groupby(['lep_web_id'], as_index=False).mean()
     
     # combined_abundane_h is at site level. host_nd, Oct_2010_h, Nov_2010_h calculated separately for Carol's native and plantation sites
@@ -51,7 +51,7 @@ def get_all_training_data(new_host_data, training_data, predicted_column, h_thre
     training_data1 = training_data.copy(deep=True)
     
     to_merge_training_data = training_data.copy(deep=True)
-    to_merge_training_data = to_merge_training_data[['para_web_id', 'Axis_1_p', 'Axis_2_p', 'weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p', 'combined_abundance_p']]
+    to_merge_training_data = to_merge_training_data[['para_web_id', 'Axis_1_p', 'Axis_2_p', 'weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p']]  # all
     to_merge_training_data = to_merge_training_data.drop_duplicates()
     
     new_host_data1 = new_host_data1.rename(columns={'recommended_para' : 'para_web_id', 'host_i' : 'lep_web_id'})
@@ -64,7 +64,7 @@ def get_all_training_data(new_host_data, training_data, predicted_column, h_thre
     new_host_data1 = new_host_data1.rename(columns={predicted_column:'interaction_frequency'})
     
     training_data1 = training_data1[['para_web_id', 'lep_web_id', 'interaction_frequency', 'interaction_binary', 'Axis_1_p',
-                                     'Axis_2_p', 'Nov_2010_p', 'Oct_2010_p', 'combined_abundance_p', 'weight_p', 'paras_nd']]
+                                     'Axis_2_p', 'Nov_2010_p', 'Oct_2010_p', 'weight_p', 'paras_nd']]
     
     all_training_data = pd.concat([new_host_data1, training_data1], sort=True)
     
@@ -78,7 +78,7 @@ n_neighbours = 11
 best_host_threshold = 0.19
 
 path_to_scaled_data = 'C:/Users/hania/Desktop/analyses/oct1/from_py/scaled_data_for_knn'
-path_to_output = 'C:/Users/hania/Desktop/analyses/oct1/from_py/training_data_with_new_hosts_added_in'
+path_to_output = 'C:/Users/hania/Desktop/rf_no_abundance/from_py/training_data_with_new_hosts_added_in'
 
 # training data
 data_lupe_combined = pd.read_csv(os.path.join(path_to_scaled_data, 'GP_all_final.csv'))
