@@ -6,8 +6,8 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics import f1_score
 
-path_to_results = 'C:/Users/hania/Desktop/analyses/oct1/from_py/f1_score_parameters_knn'
-path_to_data = 'C:/Users/hania/Desktop/analyses/oct1/from_py/parameter_search_knn'
+path_to_results = 'C:/Users/hania/Desktop/rf_no_abundance/from_py/f1_score_parameters_knn'
+path_to_data = 'C:/Users/hania/Desktop/rf_no_abundance/from_py/parameter_search_knn'
 
 
 def calculate_metric(mydata, actual_column, predicted_column, csv_name, my_path):
