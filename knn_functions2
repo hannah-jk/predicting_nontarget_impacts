@@ -1,0 +1,118 @@
+# KNN functions 2
+
+
+def knn_function_hp(data_test, data_train, traits, k, user_web_id, item_web_id, for_new_h):
+    
+    # data_test: test data
+    # data_train: train data
+    # traits: list of traits
+    # k: number of neighbours
+    # user_web_id, item_web_id: 'para_web_id' or 'lep_web_id'. 
+    # user_web_id='para_web_id' & item_web_id= 'lep_web_id', if recommending h sp to p sp. 
+    # for_new_h: string yes, no. yes if using this function to add in new host species into the network. 
+    
+    import copy
+    import pandas as pd
+    from scipy.spatial import distance_matrix
+    from my_functions_knn import format_trait_data
+    
+    d_test = data_test.copy(deep=True)
+    d_train = data_train.copy(deep=True)
+    traits_d = copy.deepcopy(traits)
+    
+    user_traits_train = format_trait_data(mydata1=d_train, list_traits=traits_d, h_p=user_web_id)
+    
+    list_sites = d_test.site_ID.unique().tolist()  # get list of test sites
+    
+    final_list_df = [0] * len(list_sites)
+    
+    for i, site in enumerate(list_sites):
+    
+        user_traits_test = d_test[d_test.site_ID == list_sites[i]]  # subset to get data at site i 
+        
+        if for_new_h == "no":
+            item_one_site = user_traits_test[item_web_id].unique().tolist()  # get list of item sp at site i
+        else:
+            item_one_site = []
+        
+        user_one_site = user_traits_test[user_web_id].unique().tolist()  # get list of user sp at site i
+        
+        user_traits_test = format_trait_data(mydata1=user_traits_test, list_traits=traits_d, h_p=user_web_id)
+
+        dist_mat_user = pd.DataFrame(distance_matrix(user_traits_train.values, user_traits_test.values, p=2), index=user_traits_train.index, columns=user_traits_test.index)
+        
+        my_data = d_train.copy(deep=True)
+        
+        df_all = loop_sp(user_one_site, dist_mat_user, my_data, user_web_id, item_web_id, item_one_site, k, for_new_h)
+        
+        df_all['site_id'] = [site] * (df_all.shape[0])
+
+        final_list_df[i] = df_all
+        
+    df_all_final = pd.concat(final_list_df)
+    return(df_all_final)
+
+
+def loop_sp(user_one_site, dist_mat_user, my_data, user_web_id, item_web_id, item_one_site, k, for_new_h):
+    
+    import pandas as pd
+    
+    list_df = [0] * (len(user_one_site))
+    
+    for j, user_sp in enumerate(user_one_site):
+    
+        dist_one = dist_mat_user[user_one_site[j]]
+        
+        if user_one_site[j] in dist_one:
+            dist_one = dist_one.drop(labels=user_one_site[j])  # drop sp j (sp j can't be a neighbour to sp j).
+                
+        dist_one = dist_one.to_frame()
+        
+        dist_one = dist_one.sample(frac=1, replace=False)  # shuffle rows in case there are ties
+                
+        k_neighbours = dist_one.nsmallest(k, user_one_site[j], keep='first')
+        k_neighbours = list(k_neighbours.index)
+        dist_one = dist_one.loc[k_neighbours, :]
+        data_train_one = my_data.loc[my_data[user_web_id].isin(k_neighbours)]
+    
+        dk = dist_one[user_one_site[j]].max()
+        d1 = dist_one[user_one_site[j]].min()
+        
+        recommended_sp = data_train_one.loc[:, ['para_web_id', 'lep_web_id', 'interaction_frequency', 'interaction_binary']]
+        dist_one.index.names = ['user_identity']
+        recommended_sp = recommended_sp.merge(dist_one, how='left', left_on=user_web_id, right_on='user_identity')
+        
+        if k == 1:
+            recommended_sp['freq_dist'] = recommended_sp['interaction_frequency']
+            recommended_sp['binary_dist'] = recommended_sp['interaction_binary']
+        else:
+            recommended_sp['freq_dist'] = recommended_sp['interaction_frequency'] * ((dk - recommended_sp[user_one_site[j]]) / (dk - d1))
+            recommended_sp['binary_dist'] = recommended_sp['interaction_binary'] * ((dk - recommended_sp[user_one_site[j]]) / (dk - d1))
+        # from Dudani 1976
+        
+        recommended_sp = recommended_sp.drop([user_web_id, user_one_site[j]], axis=1)
+        recommended_sp = recommended_sp.groupby([item_web_id]).sum().reset_index()
+        
+        # subset to only get item sp present at the site
+        if for_new_h == "no":
+            recommended_sp = recommended_sp[recommended_sp[item_web_id].isin(item_one_site)]
+                
+        # interaction frequency is the sum of all k neighbours, so dividing by k
+        to_divide = ['freq_dist', 'interaction_frequency', 'binary_dist', 'interaction_binary']
+        recommended_sp[to_divide] = recommended_sp[to_divide]. div(len(k_neighbours))
+        
+        recommended_sp['user_i'] = [user_sp] * (len(recommended_sp.index))
+        
+        if user_web_id == 'para_web_id':
+            recommended_sp = recommended_sp.rename(columns={"lep_web_id" : "recommended_host", "interaction_frequency": "average_freq",
+                                                            "interaction_binary":"proportion_of_neighbours_that_attack_host",
+                                                            "user_i":"parasitoid_i"})
+        else:
+            recommended_sp = recommended_sp.rename(columns={"para_web_id" : "recommended_para", "interaction_frequency": "average_freq",
+                                                            "interaction_binary":"proportion_of_neighbours_that_attacked_by_para",
+                                                            'user_i':'host_i'})
+        
+        list_df[j] = recommended_sp
+    df_all = pd.concat(list_df)
+    return(df_all)
+
