@@ -53,6 +53,16 @@ overdisp_fun <- function(model){
   # this function is from Bolker et al 2009
 }
 
+overdisp_fun_1 <- function(model) {
+  rdf <- df.residual(model)
+  rp <- residuals(model,type="pearson")
+  Pearson.chisq <- sum(rp^2)
+  prat <- Pearson.chisq/rdf
+  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE)
+  c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)
+  # from: https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html#testing-for-overdispersioncomputing-overdispersion-factor
+}
+
 print_metrics <- function(model1){
   
   print('Model coefficients')
