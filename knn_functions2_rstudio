@@ -1,0 +1,100 @@
+# indirect effects functions
+
+expected_attacks_f <- function(df1, sp_i_list){
+  
+  # Calculates EiA(t+1). Equation 3 from Frost et al. 2016 Nature communication. 
+  # df1: dataframe with columns: sp_j, sp_i, dijt, alpha_i_A_before, n_i_A_after_extra, n_j_B_before, n_j_B_after.
+  # before (time=t), after (time=t+1)
+  # sp_i and sp_j include forest-site-trt e.g. 'Apoctena.sp_N_07_EH'
+  # sp_i_list: list of host sp to calculate EiA(t+1) for. Should be: sp_i_list <- as.character(unique(df1$sp_i))
+  
+  all_E <- 0
+  all_sp_i <- 0
+  
+  for (i in seq_along(sp_i_list)){
+    
+    df <- df1[(df1$sp_i == sp_i_list[i]), ] # subset by sp_i
+    
+    df$one_E <- (df$dijt * df$alpha_i_A_before * df$n_j_B_after)/(df$n_j_B_before * df$n_i_A_after_extra) # create new column
+    
+    all_E[i] <- sum(df$one_E)
+    all_sp_i[i] <- sp_i_list[i]
+  }
+  df_result <- data.frame(all_sp_i, all_E)
+  return(df_result)
+}
+
+abundance_f <- function(df, collection_val, extra_val){
+  
+  df <- df[is.element(df$collection, collection_val), ] # subset by collection
+  
+  df <- df[is.element(df$extra, extra_val), ]
+  
+  df <- df[ , c("Lep.web.ID","site_id")]
+  
+  df$number_hosts <- rep(1, nrow(df)) 
+  
+  df <- aggregate(number_hosts ~ Lep.web.ID + site_id, df, sum)
+  
+  return(df)
+}
+
+overdisp_fun <- function(model){
+  vpars <- function(m) {
+    nrow(m)*(nrow(m)+1)/2
+  }
+  model.df <- sum(sapply(VarCorr(model),vpars))+length(fixef(model))
+  (rdf <- nrow(model@frame)-model.df)
+  rp <- residuals(model)
+  Pearson.chisq <- sum(rp^2)
+  prat <- Pearson.chisq/rdf
+  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE,log.p=TRUE)
+  c(chisq=Pearson.chisq,ratio=prat,p=exp(pval))
+  # this function is from Bolker et al 2009
+}
+
+print_metrics <- function(model1){
+  
+  print('Model coefficients')
+  print(summary(model1)$coefficients)
+  
+  print('Model AIC')
+  print(AIC(model1))
+  
+  print('Model R2')
+  print(r.squaredGLMM(model1))
+  
+  print('Model overdispersion')
+  print(overdisp_fun(model1))
+  
+}
+
+h_leverage <- function(n, xi, xj, x_mean){
+  
+  # n, xi, x_mean are numbers
+  # xj is a vector
+  
+  h_i <- (1/n) + ((xi-x_mean)^2)/sum((xj-x_mean)^2)
+  return(h_i)
+}
+
+find_outliers <- function(mydata, n_model_parameters){
+  
+  h_value_all <- vector()
+  
+  for (i in 1:nrow(mydata)){
+    
+    xj_values <- mydata$all_E
+    xi_value <- xj_values[i]
+    
+    h_value <- h_leverage(n=nrow(mydata), xi=xi_value, xj=xj_values, x_mean=mean(mydata$all_E))
+    
+    h_value_all[i] <- h_value
+  }
+  
+  to_return <- data.frame(mydata$all_E, h_value_all)
+  
+  to_compare <- (2*(n_model_parameters))/nrow(mydata)
+  to_return$outlier_yn <- ifelse(to_return$h_value_all>to_compare, "yes", "no")
+  return(to_return)
+}
