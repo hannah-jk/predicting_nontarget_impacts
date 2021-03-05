@@ -1,0 +1,73 @@
+# KNN (scale data)
+
+import os
+import pandas as pd
+from scaling_functions import get_scalers, get_data
+
+pd.options.display.max_columns = 50
+pd.set_option('display.width', 200)
+
+
+def some_format(mydata):
+    
+    mydata = mydata[mydata.native_or_exotic_h != 'missing']
+    mydata = mydata.rename(columns={"paras_web_ID": "para_web_id", "Lep_web_ID" : "lep_web_id"})
+    
+    return(mydata)
+
+
+path_to_file = "C:/Users/hania/Desktop/analyses/oct1/from_r"
+path_to_output = 'C:/Users/hania/Desktop/analyses/oct1/from_py/scaled_data_for_knn'
+
+train_pl = pd.read_csv(os.path.join(path_to_file, "GP_plantation_final.csv"))
+train_n = pd.read_csv(os.path.join(path_to_file, "GP_native_final.csv"))
+train_c = pd.read_csv(os.path.join(path_to_file, "GP_all_final.csv"))
+
+test_pl = pd.read_csv(os.path.join(path_to_file, "CF_plantation_final.csv"))
+test_n = pd.read_csv(os.path.join(path_to_file, "CF_native_final.csv"))
+
+all_host_traits = ['Axis_1_h', 'Axis_2_h', 'weight_h', 'host_nd', 'Oct_2010_h', 'Nov_2010_h', 'combined_abundance_h',
+                   'native_or_exotic_h']
+all_para_traits = ['Axis_1_p', 'Axis_2_p', 'weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p', 'combined_abundance_p']
+
+host_scaler = get_scalers(pathtofile=path_to_file, sp_traits=all_host_traits)
+para_scaler = get_scalers(pathtofile=path_to_file, sp_traits=all_para_traits)
+
+list_dfs = [train_pl, train_n, train_c, test_n, test_pl]
+train_pl, train_n, train_c, test_n, test_pl = map(some_format, list_dfs)
+
+train_c = train_c.rename(columns={'host_nd_all' : 'host_nd', 'paras_nd_all' : 'paras_nd'})
+train_pl = train_pl.rename(columns={'host_nd_e' : 'host_nd', 'paras_nd_e' : 'paras_nd'})
+train_n = train_n.rename(columns={'host_nd_n' : 'host_nd', 'paras_nd_n' : 'paras_nd'})
+
+test_n_for_n = test_n.copy(deep=True)  # for_n means this is the data I'll use for testing predictions made by the native model. 
+test_n_for_n = test_n_for_n.rename(columns={'host_nd_n' : 'host_nd', 'paras_nd_n' : 'paras_nd'})
+test_pl_for_n = test_pl.copy(deep=True)
+test_pl_for_n = test_pl_for_n.rename(columns={'host_nd_pn' : 'host_nd', 'paras_nd_pn' : 'paras_nd'})
+
+test_n_for_pl = test_n.copy(deep=True)
+test_n_for_pl = test_n_for_pl.rename(columns={'host_nd_np' : 'host_nd', 'paras_nd_np' : 'paras_nd'})
+test_pl_for_pl = test_pl.copy(deep=True)
+test_pl_for_pl = test_pl_for_pl.rename(columns={'host_nd_e' : 'host_nd', 'paras_nd_e' : 'paras_nd'})
+
+train_pl = get_data(alldata1=train_pl, host_scaler=host_scaler, para_scaler=para_scaler, train_test='train')
+train_n = get_data(alldata1=train_n, host_scaler=host_scaler, para_scaler=para_scaler, train_test='train')
+train_c = get_data(alldata1=train_c, host_scaler=host_scaler, para_scaler=para_scaler, train_test='train')
+
+test_n_for_n = get_data(alldata1=test_n_for_n, host_scaler=host_scaler, para_scaler=para_scaler, train_test='test')
+test_pl_for_n = get_data(alldata1=test_pl_for_n, host_scaler=host_scaler, para_scaler=para_scaler, train_test='test')
+
+test_n_for_pl = get_data(alldata1=test_n_for_pl, host_scaler=host_scaler, para_scaler=para_scaler, train_test='test')
+test_pl_for_pl = get_data(alldata1=test_pl_for_pl, host_scaler=host_scaler, para_scaler=para_scaler, train_test='test')
+
+data_test_for_n = test_n_for_n.append(test_pl_for_n)
+data_test_for_pl = test_n_for_pl.append(test_pl_for_pl)
+data_test_for_c = test_n_for_n.append(test_pl_for_pl)
+
+train_pl.to_csv(os.path.join(path_to_output, 'GP_plantation_final.csv'), index=False)
+train_n.to_csv(os.path.join(path_to_output, 'GP_native_final.csv'), index=False)
+train_c.to_csv(os.path.join(path_to_output, 'GP_all_final.csv'), index=False)
+
+data_test_for_n.to_csv(os.path.join(path_to_output, 'CF_for_n.csv'), index=False)
+data_test_for_pl.to_csv(os.path.join(path_to_output, 'CF_for_pl.csv'), index=False)
+data_test_for_c.to_csv(os.path.join(path_to_output, 'CF_for_c.csv'), index=False)
