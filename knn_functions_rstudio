@@ -1,0 +1,131 @@
+# functions
+
+print_metrics <- function(my_model){
+  
+  print('Model coefficients') 
+  print(summary(my_model)$coefficients)
+  
+  print('Model AIC') 
+  print(AIC(my_model))
+  
+  print('Model R2') 
+  print(r.squaredGLMM(my_model)) # from MuMln
+  
+  print('Model overdispersion') 
+  print(overdisp_fun_1(my_model))
+  
+  # from: https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html#testing-for- 
+  # overdispersioncomputing-overdispersion-factor
+}
+
+scale_some_variables_knn <- function(mydata){
+  
+  mydata$predicted_frequency_sc <- scale(mydata$predicted_frequency, center=TRUE, scale=TRUE)
+  mydata$paras_nd_sc <- scale(mydata$paras_nd, center = TRUE, scale = TRUE)
+  mydata$host_nd_sc <- scale(mydata$host_nd, center = TRUE, scale = TRUE)
+  
+  mydata$host_abundance_sc <- scale(mydata$combined_abundance_h, center=TRUE, scale=TRUE)
+  mydata$para_abundance_sc <- scale(mydata$combined_abundance_p, center=TRUE, scale=TRUE)
+  
+  mydata$prediction_wr[mydata$prediction_wr == "right"] <- 1
+  mydata$prediction_wr[mydata$prediction_wr == "wrong"] <- 0
+  
+  mydata$prediction_wr <- as.numeric(mydata$prediction_wr)
+  
+  return(mydata)
+}
+
+random_effect_options_compare_knn <- function(mydata){
+  
+  print("m3_o")
+  m3_o <- glmer(true_interaction_freq ~ predicted_frequency_sc + (1|name_site_id) +
+                  (predicted_frequency_sc|paras_web_ID), data=mydata, family=poisson, 
+                control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+  
+  print("m3_a")
+  m3_a <- glmer(true_interaction_freq ~ predicted_frequency_sc +
+                  (predicted_frequency_sc|paras_web_ID), data=mydata, family=poisson, 
+                control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+  
+  print("m3_b")
+  m3_b <- glmer(true_interaction_freq ~ predicted_frequency_sc + (1|name_site_id), 
+                data=mydata, family=poisson, 
+                control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+  
+  print("m3_c")
+  m3_c <- glmer(true_interaction_freq ~ predicted_frequency_sc +
+                  (1|paras_web_ID), data=mydata, family=poisson, 
+                control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+  
+  print("m3_d")
+  m3_d <- glmer(true_interaction_freq ~ predicted_frequency_sc + (1|name_site_id) +
+                  (1|paras_web_ID), data=mydata, family=poisson, 
+                control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+  
+  print("m3_e")
+  m3_e <- glm(true_interaction_freq ~ predicted_frequency_sc, data=mydata, family=poisson)
+  
+  print(AIC(m3_o, m3_a, m3_b, m3_c, m3_d, m3_e))
+  
+}
+
+re_binary_knn <- function(mymodel){
+  
+  print("ma")
+  ma <- update(mymodel, .~. -(1|name_site_id))
+  
+  print("mb")
+  mb <- update(mymodel, .~. -(1|h_p))
+  
+  print("mc")
+  mc <- glm(prediction_wr ~  host_nd_sc*paras_nd_sc + host_abundance_sc*para_abundance_sc*forest_id, data=predictions, 
+            family=binomial)
+  
+  print(AIC(mymodel, ma, mb, mc))
+}
+
+re_frequency_knn <- function(mymodel){
+  
+  print("ma")
+  ma <- update(mymodel, .~. -(1|name_site_id))
+  
+  print("mb")
+  mb <- update(mymodel, .~. -(predicted_frequency_sc|paras_web_ID))
+  
+  print("mc")
+  mc <- update(mymodel, .~. -(predicted_frequency_sc|paras_web_ID) + (1|paras_web_ID))
+  
+  print("md")
+  md <- update(mymodel, .~. -(1|name_site_id) -(predicted_frequency_sc|paras_web_ID) + (1|paras_web_ID))
+  
+  print("me")
+  me <- glm(true_interaction_freq ~ predicted_frequency_sc*paras_nd_sc*host_nd_sc + 
+              forest_id*predicted_frequency_sc*para_abundance_sc*host_abundance_sc, data=predictions, family=poisson)
+  
+  print(AIC(mymodel, ma, mb, mc, md, me))
+}
+
+plot_3d_abund <- function(m_without, mydata, n){
+  
+  # m_without is the model without host&para ND
+  
+  myresiduals <- residuals(m_without)
+  mydata$myresiduals <- myresiduals
+  
+  mydata$para_abundance_sc <- as.numeric(mydata$para_abundance_sc)
+  mydata$host_abundance_sc <- as.numeric(mydata$host_abundance_sc)
+  
+  mymodel <- lm(myresiduals ~ para_abundance_sc*host_abundance_sc, data=mydata)
+  
+  myplot <- visreg2d(mymodel, x="para_abundance_sc", y="host_abundance_sc", data=mydata, scale='response', plot.type="gg") + 
+    geom_contour(aes(z=z), color="white") + geom_jitter(aes(para_abundance_sc, host_abundance_sc), data=mydata, 
+                                                        width=0.03, height=0.03, size=5) + 
+    theme(legend.title = element_text(size = n), legend.text = element_text(size=n),
+          legend.key.height = unit(2.5, "cm")) +
+    theme(axis.text=element_text(size=(n-2)),
+          axis.title=element_text(size=n)) + 
+    labs(x="Parasitoid abundance (scaled)", y="Host abundance (scaled)") +
+    guides(fill = guide_colorbar(title = "Observed interaction \n frequency (residuals)"))
+  
+  return(myplot)
+}
