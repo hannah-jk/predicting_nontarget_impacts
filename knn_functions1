@@ -1,0 +1,205 @@
+# KNN functions
+
+
+def find_parameters(data_lupe_1, path_to_results, user_web_id, item_web_id, user_traits_1):
+    
+    import os
+    import copy
+    import itertools
+    import pandas as pd
+    import numpy as np
+    
+    data_lupe = data_lupe_1.copy(deep=True)
+    user_traits = copy.deepcopy(user_traits_1)
+    
+    # traits
+    complete_list = [list(subset) for i in range(1, len(user_traits) + 1) for subset in itertools.combinations(user_traits, i)]
+    # creates list of lists with all possible subsets, order doesn't matter. Gives just ['a', 'b'] not both ['a', 'b'] and ['b', 'a']
+    
+    complete_list = delete_list(complete_list, 'Axis_1_h', 'Axis_2_h')
+    complete_list = delete_list(complete_list, 'Axis_2_h', 'Axis_1_h')
+    complete_list = delete_list(complete_list, 'Oct_2010_h', 'Nov_2010_h')
+    complete_list = delete_list(complete_list, 'Nov_2010_h', 'Oct_2010_h')
+    
+    complete_list = delete_list(complete_list, 'Axis_1_p', 'Axis_2_p')
+    complete_list = delete_list(complete_list, 'Axis_2_p', 'Axis_1_p')
+    complete_list = delete_list(complete_list, 'Oct_2010_p', 'Nov_2010_p')
+    complete_list = delete_list(complete_list, 'Nov_2010_p', 'Oct_2010_p')
+        
+    parameters = {'k': list(range(1, 21)), 'user_traits_in_dictionary': complete_list}  # range last point not included
+    
+    lengths = [len(i) for i in parameters.values()]
+    n_combinations = np.prod(lengths)
+    keys = list(parameters)
+    
+    result_all = [0] * n_combinations
+    combination_value_all = [0] * n_combinations
+    combination_no_all = [0] * n_combinations
+    
+    for l, combination in enumerate(itertools.product(*map(parameters.get, keys))):
+        
+        result_one = l_one_out(d_lupe=data_lupe, user_web_id=user_web_id, item_web_id=item_web_id, **dict(zip(keys, combination)))
+        result_one['param_combination'] = [l] * (result_one.shape[0])  # add column 'param_combination'
+        result_all[l] = result_one
+        
+        result_one.to_csv(os.path.join(path_to_results, 'knn_parameters%d.csv' % l), index=False)
+    
+        combination_value_all[l] = combination
+        combination_no_all[l] = l
+    
+    result_all = pd.concat(result_all)
+    
+    result_all.to_csv(os.path.join(path_to_results, 'parameters_all.csv'), index=False)
+    
+    c_df = pd.DataFrame(list(zip(combination_value_all, combination_no_all)), columns=['value', 'number'])
+    
+    c_df.to_csv(os.path.join(path_to_results, 'no_combination.csv'), index=False)
+    
+    df_metrics = calculate_rmse(data_a=result_all, actual_column='true_interaction_freq', predicted_column='predicted_interaction_freq')
+    
+    df_metrics2 = calculate_rmse(data_a=result_all, actual_column='true_interaction_freq', predicted_column='predicted_freq_dist')
+    
+    print('unweighted', df_metrics.iloc[df_metrics.rmse.idxmin()])
+    print('weighted', df_metrics2.iloc[df_metrics2.rmse.idxmin()])
+    
+    df_metrics.to_csv(os.path.join(path_to_results, 'm_no_weight.csv'), index=False)
+    df_metrics2.to_csv(os.path.join(path_to_results, 'm_weight.csv'), index=False)
+
+
+def delete_list(my_list, key1, key2):
+    
+    to_delete = []
+    for i, item in enumerate(my_list):
+        if key1 in item and key2 not in item:
+            to_delete.append(i)
+    new_list = [i for j, i in enumerate(my_list) if j not in to_delete]
+    return new_list
+
+
+def calculate_rmse(data_a, actual_column, predicted_column):
+    
+    import numpy as np
+    import pandas as pd
+    from sklearn.metrics import mean_squared_error
+    from math import sqrt
+    
+    # actual_column and predicted_column name of column in df with actual and predicted values. Pass as string
+    # eg. actual_column='interaction_frequency'
+    
+    df = data_a.copy(deep=True)
+    list_combination = df.param_combination.unique().tolist()
+    
+    rmse_all = np.zeros(len(list_combination))
+    combination_all = np.zeros(len(list_combination))
+    
+    for i, combination in enumerate(list_combination):
+        
+        df_i = df[df.param_combination == combination]
+                     
+        y_actual = df_i[actual_column].tolist()
+        y_predicted = df_i[predicted_column].tolist()
+        rmse_one = sqrt(mean_squared_error(y_actual, y_predicted))
+        
+        rmse_all[i] = rmse_one  
+        combination_all[i] = combination
+        
+        result_m = pd.DataFrame(list(zip(rmse_all, combination_all)), columns=['rmse', 'combination_all'])
+        
+    return(result_m)
+
+
+def l_one_out(d_lupe, user_traits_in_dictionary, k, user_web_id, item_web_id):
+
+    # user_web_id, item_web_id, pass as string 'para_web_id', 'lep_web_id'
+    
+    import copy
+    import pandas as pd
+    from scipy.spatial import distance_matrix
+    
+    data_lupe = d_lupe.copy(deep=True)
+    user_traits_l = copy.deepcopy(user_traits_in_dictionary)
+    
+    user_sp_list = data_lupe[user_web_id].unique().tolist()
+    
+    recommend_all = [0] * len(user_sp_list)
+    
+    for i, user_i in enumerate(user_sp_list):
+        
+        data_lupe_no_i = data_lupe[data_lupe[user_web_id] != user_i]
+        data_lupe_no_i = data_lupe_no_i[data_lupe_no_i.interaction_frequency != 0]
+        
+        data_lupe_i = data_lupe[data_lupe[user_web_id] == user_i]
+        
+        data_lupe_no_i_traits = format_trait_data(mydata1=data_lupe_no_i, list_traits=user_traits_l, h_p=user_web_id)
+        data_lupe_i_traits = format_trait_data(mydata1=data_lupe_i, list_traits=user_traits_l, h_p=user_web_id)
+        
+        dist_mat_i = pd.DataFrame(distance_matrix(data_lupe_no_i_traits.values, data_lupe_i_traits.values, p=2), index=data_lupe_no_i_traits.index,
+                                  columns=data_lupe_i_traits.index)
+        
+        dist_mat_i = dist_mat_i.sample(frac=1, replace=False)  # shuffle rows in case there are ties
+        
+        dist_mat_i = dist_mat_i.nsmallest(k, user_i, keep='first')  # get k rows with the smallest 'user_i' values (user_i has the distance each user sp is to user_i)
+        dist_mat_i[user_web_id] = dist_mat_i.index  # make row index into column called 'user_web_id'
+        
+        dk = dist_mat_i[user_i].max()
+        d1 = dist_mat_i[user_i].min()
+        
+        k_neighbours_list = dist_mat_i[user_web_id].unique().tolist()
+        
+        recommend_i = data_lupe_no_i[data_lupe_no_i[user_web_id].isin(k_neighbours_list)]
+        recommend_i = pd.merge(recommend_i, dist_mat_i, how='left', on=user_web_id)
+        recommend_i = recommend_i[['para_web_id', 'lep_web_id', 'interaction_frequency', 'interaction_binary', user_i]]
+        
+        if k == 1:
+            recommend_i['freq_dist'] = recommend_i['interaction_frequency']
+            recommend_i['binary_dist'] = recommend_i['interaction_binary']
+        else:
+            recommend_i['freq_dist'] = recommend_i['interaction_frequency'] * ((dk - recommend_i[user_i]) / (dk - d1))
+            recommend_i['binary_dist'] = recommend_i['interaction_binary'] * ((dk - recommend_i[user_i]) / (dk - d1))
+        # from Dudani 1976 
+                
+        recommend_i = recommend_i.drop([user_web_id, user_i], axis=1)
+        recommend_i = recommend_i.groupby([item_web_id]).sum().reset_index()
+        
+        to_divide = ['freq_dist', 'interaction_frequency', 'binary_dist', 'interaction_binary']
+        recommend_i[to_divide] = recommend_i[to_divide].div(k)
+        recommend_i['user_id'] = [user_i] * (recommend_i.shape[0])
+        
+        recommend_i = recommend_i.rename(columns={item_web_id : "recommended_item", "user_id":"user_i", 'freq_dist':'predicted_freq_dist',
+                                                  'interaction_frequency':'predicted_interaction_freq', 'binary_dist':'predicted_binary_dist',
+                                                  'interaction_binary':'predicted_interaction_binary'})
+        
+        data_lupe_i = data_lupe_i[['para_web_id', 'lep_web_id', 'interaction_frequency', 'interaction_binary']]
+        data_lupe_i = data_lupe_i.rename(columns={item_web_id:'recommended_item', user_web_id: 'user_i',
+                                                  'interaction_frequency':'true_interaction_freq',
+                                                  'interaction_binary': 'true_interaction_binary'})
+        
+        recommend_i = pd.merge(recommend_i, data_lupe_i, how='outer', on=['recommended_item', 'user_i'])  # merge on two columns
+        recommend_i = recommend_i[recommend_i.true_interaction_freq.notna()]
+        recommend_i.fillna(0, inplace=True)
+                
+        recommend_all[i] = recommend_i
+        
+    recommend_all = pd.concat(recommend_all)
+    
+    return(recommend_all)
+
+
+def format_trait_data(mydata1, list_traits, h_p):
+   
+    # h_p: 'para_web_id' or 'lep_web_id'
+    
+    import copy
+    
+    mydata = mydata1.copy(deep=True)
+    list_traits_d = copy.deepcopy(list_traits)
+    list_traits_d.append(h_p)
+    
+    # get df with sp (rows), traits (columns)
+    mydata = mydata[list_traits_d]
+    mydata = mydata.drop_duplicates()
+    
+    mydata = mydata.set_index(h_p)  # makes h_p the row index. 'h_p' column is dropped 
+    mydata.index.names = [None]
+            
+    return(mydata)
