@@ -1,0 +1,136 @@
+# KNN (scaling functions)
+
+
+def get_scalers(pathtofile, sp_traits):
+    
+    import os 
+    import pandas as pd
+    from sklearn import preprocessing
+    
+    train_pl = pd.read_csv(os.path.join(pathtofile, "GP_plantation_final.csv"))
+    train_n = pd.read_csv(os.path.join(pathtofile, "GP_native_final.csv"))
+    train_c = pd.read_csv(os.path.join(pathtofile, "GP_all_final.csv"))
+    
+    test_pl = pd.read_csv(os.path.join(pathtofile, "CF_plantation_final.csv"))
+    test_n = pd.read_csv(os.path.join(pathtofile, "CF_native_final.csv"))
+    
+    train_c = train_c.rename(columns={'host_nd_all' : 'host_nd', 'paras_nd_all' : 'paras_nd',
+                                      "paras_web_ID": "para_web_id", "Lep_web_ID" : "lep_web_id"})
+    
+    train_pl = train_pl.rename(columns={'host_nd_e' : 'host_nd', 'paras_nd_e' : 'paras_nd',
+                                        "paras_web_ID": "para_web_id", "Lep_web_ID" : "lep_web_id"})
+    
+    train_n = train_n.rename(columns={'host_nd_n' : 'host_nd', 'paras_nd_n' : 'paras_nd',
+                                      "paras_web_ID": "para_web_id", "Lep_web_ID" : "lep_web_id"})
+    
+    # min max of ND columns in test data always within min max of ND in train data, so here have just picked _e and _n, so
+    # number of columns in train and test data are the same so can concat. 
+    test_pl = test_pl.rename(columns={'host_nd_e' : 'host_nd', 'paras_nd_e' : 'paras_nd',
+                                      "paras_web_ID": "para_web_id", "Lep_web_ID" : "lep_web_id"})
+    
+    test_n = test_n.rename(columns={'host_nd_n' : 'host_nd', 'paras_nd_n' : 'paras_nd',
+                                    "paras_web_ID": "para_web_id", "Lep_web_ID" : "lep_web_id"})
+    
+    train_pl = train_pl[sp_traits]
+    train_n = train_n[sp_traits]
+    train_c = train_c[sp_traits]
+    
+    test_pl = test_pl[sp_traits]
+    test_n = test_n[sp_traits]
+    
+    data_all = pd.concat([train_pl, train_n, train_c, test_pl, test_n])  # matches by column names
+    
+    if 'native_or_exotic_h' in list(data_all):
+        data_all = data_all[data_all.native_or_exotic_h != 'missing']
+    
+    x = data_all.to_numpy()
+    
+    my_scaler = preprocessing.MinMaxScaler()
+    my_scaler.fit(x)
+    
+    return(my_scaler)
+
+
+def get_data(alldata1, host_scaler, para_scaler, train_test):
+    
+    import pandas as pd
+    
+    all_host_traits = ['Axis_1_h', 'Axis_2_h', 'weight_h', 'host_nd', 'Oct_2010_h', 'Nov_2010_h', 'combined_abundance_h',
+                       'native_or_exotic_h']
+    all_para_traits = ['Axis_1_p', 'Axis_2_p', 'weight_p', 'paras_nd', 'Oct_2010_p', 'Nov_2010_p', 'combined_abundance_p']
+    
+    alldata = alldata1.copy(deep=True)
+    
+    if 'site_ID' in list(alldata):
+        alldata['site_ID'] = alldata['site_ID'].str.zfill(7)
+    
+    web_data = alldata.copy(deep=True)
+    
+    if alldata.isnull().sum().sum() != 0:
+        print("there are na values")
+    
+    if train_test == 'train':
+        
+        web_data = web_data[['para_web_id', 'lep_web_id', 'interaction_frequency', 'interaction_binary']]
+        
+        host_data = scale_data_01(mydata1=alldata, mytraits1=all_host_traits, hp="lep_web_id", myscaler=host_scaler)
+        para_data = scale_data_01(mydata1=alldata, mytraits1=all_para_traits, hp="para_web_id", myscaler=para_scaler)
+    
+        data_scaled = pd.merge(web_data, host_data, how='left', on="lep_web_id")
+        data_scaled = pd.merge(data_scaled, para_data, how='left', on="para_web_id")
+        
+    elif train_test == 'test':
+        
+        web_data = web_data[['para_web_id', 'lep_web_id', 'interaction_frequency', 'interaction_binary', 'site_ID']]
+        
+        alldata["lep_web_id_site_id"] = alldata['lep_web_id'] + ' ' + alldata['site_ID']
+        alldata["para_web_id_site_id"] = alldata['para_web_id'] + ' ' + alldata['site_ID']
+        
+        host_data = scale_data_01(mydata1=alldata, mytraits1=all_host_traits, hp="lep_web_id_site_id", myscaler=host_scaler)
+        para_data = scale_data_01(mydata1=alldata, mytraits1=all_para_traits, hp="para_web_id_site_id", myscaler=para_scaler)
+        
+        host_data[['lep_web_id', 'site_ID']] = host_data.lep_web_id_site_id.str.split(" ", expand=True)
+        para_data[['para_web_id', 'site_ID']] = para_data.para_web_id_site_id.str.split(" ", expand=True)
+        
+        host_data = host_data.drop(columns=['lep_web_id_site_id'])
+        para_data = para_data.drop(columns=['para_web_id_site_id'])
+        
+        data_scaled = pd.merge(web_data, host_data, how='left', on=["lep_web_id", "site_ID"])
+        data_scaled = pd.merge(data_scaled, para_data, how='left', on=["para_web_id", "site_ID"])
+        
+    else:
+        print("The train_test argument must be set to either test or train")
+    
+    return(data_scaled)
+
+
+def scale_data_01(mydata1, mytraits1, hp, myscaler):
+    
+    import copy
+    import pandas as pd
+    
+    mydata = mydata1.copy(deep=True)
+    mytraits = copy.deepcopy(mytraits1)
+    mytraits.append(hp)
+    
+    # get df with sp (rows), traits (columns)
+    mydata = mydata[mytraits]
+    mydata = mydata.drop_duplicates()
+    
+    mydata = mydata.set_index(hp)  # makes h_p the row index. 'h_p' column is dropped 
+    mydata.index.names = [None]
+    x = mydata.to_numpy()
+    
+    mydata_scaled = myscaler.transform(x)
+    mydata_scaled = pd.DataFrame(mydata_scaled, columns=mydata.columns, index=mydata.index)
+    
+    divide_by_2 = ['Axis_1_h', 'Axis_2_h', 'Axis_1_p', 'Axis_2_p', 'Oct_2010_h', 'Nov_2010_h', 'Oct_2010_p', 'Nov_2010_p']
+    
+    for i in divide_by_2:
+        if i in list(mydata_scaled):
+            mydata_scaled[i] = mydata_scaled[i].div(2)
+    
+    mydata_scaled.reset_index(level=0, inplace=True)
+    mydata_scaled = mydata_scaled.rename(columns={'index':hp})
+    
+    return(mydata_scaled)
