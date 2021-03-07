@@ -1,0 +1,33 @@
+# RF 'combined' model
+
+import os
+import pandas as pd
+from imblearn.over_sampling import RandomOverSampler
+from sklearn.ensemble import RandomForestClassifier
+from my_functions import random_forest_model_probability
+
+path_to_file = "C:/Users/hania/Desktop/analyses/oct1/from_r"
+
+data_train_Lupe = pd.read_csv(os.path.join(path_to_file, 'GP_all_final.csv'))
+
+data_train_Lupe = data_train_Lupe.rename(columns={'host_nd_all' : 'host_nd', 'paras_nd_all' : 'paras_nd'})
+
+data_test_Carol_n = pd.read_csv(os.path.join(path_to_file, 'CF_native_final.csv'))
+data_test_Carol_e = pd.read_csv(os.path.join(path_to_file, 'CF_plantation_final.csv'))
+ 
+data_test_Carol_n = data_test_Carol_n.rename(columns={'host_nd_n' : 'host_nd', 'paras_nd_n' : 'paras_nd'})
+data_test_Carol_e = data_test_Carol_e.rename(columns={'host_nd_e' : 'host_nd', 'paras_nd_e' : 'paras_nd'})
+
+data_test_Carol_n = data_test_Carol_n.drop(['host_nd_np', 'paras_nd_np'], axis='columns') 
+data_test_Carol_e = data_test_Carol_e.drop(['host_nd_pn', 'paras_nd_pn'], axis='columns')
+ 
+data_test_Carol = data_test_Carol_n.append(data_test_Carol_e)
+
+random_forest_model_probability(data_test=data_test_Carol, data_train=data_train_Lupe, sampler=RandomOverSampler(random_state=11),
+                    clf=RandomForestClassifier(n_estimators=944, min_samples_split=8, min_samples_leaf=12, max_features='log2', max_depth=16, criterion='gini', class_weight=None, random_state=101),
+                    path_to_scores='C:/Users/hania/Desktop/rf_no_abundance/from_py/results_rf/a_scores.csv',
+                    path_to_predictions='C:/Users/hania/Desktop/rf_no_abundance/from_py/results_rf/a_predictions.csv',
+                    probability_threshold=0.50, path_to_importances='C:/Users/hania/Desktop/rf_no_abundance/from_py/results_rf/a_importances.csv')
+
+# parameters for clf and sampling method were found in '1_rf_find_settings'
+# probability threshold found in '2_rf_find_probability'
