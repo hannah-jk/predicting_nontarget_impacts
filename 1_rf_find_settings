@@ -1,0 +1,16 @@
+# Find best hyper-parameter settings for 'combined' random-forest model (RandomForestClassifier) using training data (Lupe's data)
+
+import os
+import pandas as pd
+from my_functions import parameter_search
+
+pd.options.display.max_columns = 50
+pd.set_option('display.width', 200)
+ 
+path_to_file = 'C:/Users/hania/Desktop/analyses/oct1/from_r'
+data_GP = pd.read_csv(os.path.join(path_to_file, 'GP_all_final.csv'))
+ 
+data_GP = data_GP.rename(columns={'host_nd_all' : 'host_nd', 'paras_nd_all' : 'paras_nd'})
+ 
+parameter_search(df=data_GP,
+                 path_to_directory='C:/Users/hania/Desktop/rf_no_abundance/from_py/parameter_search_rf/combined_model/random_search_%d.csv')
