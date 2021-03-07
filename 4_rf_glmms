@@ -1,0 +1,159 @@
+# RF ('combined' model). GLMMs
+
+# packages etc ----
+
+library(stringr)
+library(lme4)
+library(MuMIn)
+library(dplyr)
+
+source("C:/Users/hania/Desktop/analyses/ms_thesis/code/linear_models/functions_linear_models.R")
+source("C:/Users/hania/Desktop/project/r_functions/over_dispersion_function.R")
+source("C:/Users/hania/Desktop/rf_no_abundance/r_code/random_effects.R")
+source("C:/Users/hania/Desktop/rf_no_abundance/r_code/figures/figure_functions.R")
+
+merge_generality <- function(data_predictions, n_data_trait, e_data_trait){
+  
+  # this merges host & parasitoid generality to the df
+  
+  # n (native)
+  n_data_p <- select(n_data_trait, c(paras_web_ID, forest_id, paras_nd_n)) # paras_nd_n
+  n_data_p <- distinct(n_data_p)
+  df <- merge(data_predictions, n_data_p, by=c("paras_web_ID", "forest_id"), all.x=TRUE)
+  
+  n_data_h <- select(n_data_trait, c(Lep_web_ID, forest_id, host_nd_n)) # host_nd_n
+  n_data_h <- distinct(n_data_h)
+  df <- merge(df, n_data_h, by=c("Lep_web_ID", "forest_id"), all.x=TRUE)
+  
+  # e (exotic/plantation)
+  e_data_p <- select(e_data_trait, c(paras_web_ID, forest_id, paras_nd_e)) # paras_nd_e
+  e_data_p <- distinct(e_data_p)
+  df <- merge(df, e_data_p, by=c("paras_web_ID", "forest_id"), all.x=TRUE)
+  
+  e_data_h <- select(e_data_trait, c(Lep_web_ID, forest_id, host_nd_e)) # host_nd_e
+  e_data_h <- distinct(e_data_h)
+  df <- merge(df, e_data_h, by=c("Lep_web_ID", "forest_id"), all.x=TRUE)
+  
+  df[is.na(df)] <- 0
+  
+  df$host_nd <- df$host_nd_n + df$host_nd_e
+  df$paras_nd <- df$paras_nd_n + df$paras_nd_e
+  
+  df <- select(df, -c(site_id, paras_nd_n, paras_nd_e, host_nd_n, host_nd_e))
+  
+  return(df)
+}
+
+# read in data ----
+
+setwd("C:/Users/hania/Desktop/rf_no_abundance/from_py/results_rf")
+predictions <- read.csv("a_predictions.csv", stringsAsFactors = FALSE)
+
+# this is the data used in the python code that generates 'n_predictions.csv'
+setwd("C:/Users/hania/Desktop/analyses/oct1/from_r")
+data_traits_CF_n <- read.csv("CF_native_final.csv", stringsAsFactors = FALSE)
+data_traits_CF_e <- read.csv("CF_plantation_final.csv", stringsAsFactors = FALSE)
+
+data_abundance_n <- data_traits_CF_n[,c("paras_web_ID", "Lep_web_ID", "site_ID", "combined_abundance_h", 
+                                        "combined_abundance_p")]
+data_abundance_e <- data_traits_CF_e[,c("paras_web_ID", "Lep_web_ID", "site_ID", "combined_abundance_h", 
+                                        "combined_abundance_p")]
+data_abundance <- rbind(data_abundance_n, data_abundance_e)
+
+# nd ----
+
+predictions$forest_id <- str_sub(predictions$name_site_id, -1)
+
+# creates new column by taking the last letter from site_ID (eg. 47_EC_N becomes N)
+data_traits_CF_n$forest_id <- str_sub(data_traits_CF_n$site_ID, -1) 
+data_traits_CF_e$forest_id <- str_sub(data_traits_CF_e$site_ID, -1)
+
+data_new <- merge_generality(data_predictions = predictions, n_data_trait=data_traits_CF_n, 
+                             e_data_trait=data_traits_CF_e)
+
+data_new$prediction_wr <- ifelse(data_new$true_binary_value==data_new$predicted_binary_value, "right", "wrong")
+
+data_new$h_p <- paste(data_new$Lep_web_ID, data_new$paras_web_ID, sep="_") 
+#so can include each h-p pair as a random effect
+
+# scale variables ----
+
+data_new <- merge(data_new, data_abundance, by.x=c('Lep_web_ID', 'paras_web_ID', 'name_site_id'), 
+                  by.y=c('Lep_web_ID', 'paras_web_ID', 'site_ID'), all.x=TRUE)
+sum(is.na(data_new))
+
+data_new <- scale_some_variables(mydata=data_new)
+
+# model 1 ----
+
+options(na.action = "na.fail")
+
+m1 <- glmer(prediction_wr ~  host_nd_sc*paras_nd_sc + host_abundance_sc*para_abundance_sc*forest_id + (1|name_site_id) + 
+              (1|h_p), data=data_new, family=binomial, control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+overdisp_fun_1(m1)
+
+re_binary(mymodel=m1) # model a best - without site. 
+
+m1_a <- glmer(prediction_wr ~  host_nd_sc*paras_nd_sc + host_abundance_sc*para_abundance_sc*forest_id + (1|h_p), 
+              data=data_new, family=binomial, control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+m1_from_dredge <- dredge(m1_a, rank="AIC")
+
+m1_best <- glmer(prediction_wr ~ host_nd_sc*paras_nd_sc + (1|h_p), data=data_new, 
+                 family=binomial, 
+                 control=glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e+05)))
+print_metrics(my_model = m1_best)
+
+# model 2 ----
+
+data_new$obs <- as.factor(seq(1, nrow(data_new)))
+
+m2 <- glmer(true_interaction_freq ~ probability_sc*paras_nd_sc*host_nd_sc + 
+              probability_sc*para_abundance_sc*host_abundance_sc + 
+              forest_id*probability_sc*para_abundance_sc*host_abundance_sc + (1|name_site_id) +
+              (probability_sc|paras_web_ID), data=data_new, family=poisson, 
+            control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+overdisp_fun_1(m2)
+
+re_frequency(mymodel=m2) # model e best
+
+m2_e <- glm(true_interaction_freq ~ probability_sc*paras_nd_sc*host_nd_sc + 
+              probability_sc*para_abundance_sc*host_abundance_sc + 
+              forest_id*probability_sc*para_abundance_sc*host_abundance_sc, data=data_new, family=poisson)
+
+m2_from_dredge <- dredge(m2_e, rank="AIC")
+
+m2_best <- glm(true_interaction_freq ~ forest_id + probability_sc*para_abundance_sc*host_abundance_sc, family=poisson, 
+               data=data_new)
+print_metrics(my_model = m2_best)
+
+m2_best_without <- glm(true_interaction_freq ~ forest_id + probability_sc, 
+                       family=poisson, data=data_new)
+
+rf_combined_figure <- plot_3d_abund(m_without=m2_best_without, mydata=data_new, n=55)
+
+# model 3 ----
+
+m3 <- glmer(true_interaction_freq ~ probability_sc + (1|name_site_id) + (probability_sc|paras_web_ID), data=data_new, 
+            family=poisson, control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+overdisp_fun_1(m3)
+
+random_effect_options_compare(mydata=data_new) # m3_c best (only choosing from non-singular models)
+
+m3_c <- glmer(true_interaction_freq ~ probability_sc + (1|paras_web_ID), data=data_new, family=poisson, 
+              control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+
+m3_from_dredge <- dredge(m3_c, rank="AIC")
+
+m3_best <- m3_c
+print_metrics(my_model = m3_best)
+
+# m3_best is overdispersed, full model isn't overdispersed. 
+m3_best_a <- glmer(true_interaction_freq ~ probability_sc + (1|paras_web_ID) + (1|obs), data=data_new, family=poisson, 
+                   control=glmerControl(optimizer="bobyqa",optCtrl=list(maxfun=2e5)))
+overdisp_fun_1(m3_best_a)
+print_metrics(my_model=m3_best_a)
+
+
