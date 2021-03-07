@@ -1,0 +1,264 @@
+# functions for RF
+ 
+
+def parameter_search(df, path_to_directory):
+    
+    import pandas as pd
+    import numpy as np
+    from sklearn.model_selection import RandomizedSearchCV, GroupKFold
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import make_scorer, average_precision_score
+    from imblearn.over_sampling import RandomOverSampler
+    from imblearn.under_sampling import NearMiss, RandomUnderSampler, CondensedNearestNeighbour
+    from imblearn.pipeline import make_pipeline
+
+    df1 = df.copy(deep=True)
+    df1 = df1[df1.native_or_exotic_h != 'missing']  # drop rows with 'missing' in native_or_exotic_h 
+    
+    groups = df1.paras_web_ID.tolist()
+    groups = pd.Series(groups).astype('category').cat.codes.values
+
+    train_features = df1[['Axis_1_h', 'Axis_2_h', 'Nov_2010_h', 'Oct_2010_h', 'weight_h', 'host_nd', 'native_or_exotic_h', 'Axis_1_p', 'Axis_2_p', 'Nov_2010_p', 'Oct_2010_p', 'weight_p', 'paras_nd', 'overlap_q']]
+    train_labels = np.array(df1['interaction_binary'])
+
+    samplers = []
+    samplers.append(RandomOverSampler(random_state=11))  # oversample minority
+    samplers.append(RandomUnderSampler(random_state=11))  # undersample majority
+    samplers.append(NearMiss(n_neighbors=3, version=1))  # possible values for version are 1,2,3. under-sampling
+    samplers.append(NearMiss(n_neighbors=3, version=2))
+    samplers.append(NearMiss(n_neighbors=3, version=3))
+    samplers.append(CondensedNearestNeighbour(sampling_strategy='auto', random_state=11, n_neighbors=1, n_seeds_S=1))  # under-sampling
+
+    for i, sampler in enumerate(samplers):
+        
+        n_estimators = [int(x) for x in np.linspace(start=100, stop=2000, num=10)]  # Number of trees in random forest
+        
+        criterion = ['gini', 'entropy']
+        
+        max_depth = [int(x) for x in np.linspace(start=1, stop=20, num=20)]
+        
+        min_samples_split = [5, 10, 15, 20, 25, 30, 35, 40]
+        
+        min_samples_leaf = [5, 10, 15, 20, 25, 30, 35, 40]
+        
+        max_features = ['sqrt', 'log2']
+        
+        class_weight = ['balanced', 'balanced_subsample', None]
+        
+        random_grid = {'randomforestclassifier__n_estimators': n_estimators,
+                       'randomforestclassifier__criterion': criterion,
+                       'randomforestclassifier__max_depth': max_depth,
+                       'randomforestclassifier__min_samples_split': min_samples_split,
+                       'randomforestclassifier__min_samples_leaf': min_samples_leaf,
+                       'randomforestclassifier__max_features': max_features,
+                       'randomforestclassifier__class_weight': class_weight}
+    
+        clf = RandomForestClassifier(random_state=101)
+        pipeline = make_pipeline(sampler, clf)
+        
+        # Random search (using 3 fold cross validation, and searching across 100 different combinations)
+        clf_random = RandomizedSearchCV(estimator=pipeline, param_distributions=random_grid, n_iter=100, cv=GroupKFold(n_splits=3), verbose=2, random_state=42, n_jobs=-1, scoring={'average_precision': make_scorer(average_precision_score, needs_proba=True), 'f1': 'f1'}, refit='f1')
+        
+        # Fit the random search model
+        clf_random.fit(train_features, train_labels, groups)
+        
+        df_scores = pd.DataFrame.from_dict(clf_random.cv_results_)
+        df_scores['sampling_method'] = i  # adds new column
+    
+        df_scores.to_csv(path_to_directory % i, index=False)
+
+
+def probability_search(df, path_to_directory, sampler, clf):
+    
+    import pandas as pd
+    import numpy as np
+    from sklearn.model_selection import GroupKFold
+    from sklearn.metrics import accuracy_score, precision_score, f1_score, recall_score
+    
+    df1 = df.copy(deep=True)
+    df1 = df1[df1.native_or_exotic_h != 'missing']  # drop rows with 'missing' in native_or_exotic_h
+    
+    groups = df1.paras_web_ID.tolist()
+    groups = pd.Series(groups).astype('category').cat.codes.values
+    
+    X = df1[['Axis_1_h', 'Axis_2_h', 'Nov_2010_h', 'Oct_2010_h', 'weight_h', 'host_nd', 'native_or_exotic_h', 'Axis_1_p', 'Axis_2_p', 'Nov_2010_p', 'Oct_2010_p', 'weight_p', 'paras_nd', 'overlap_q']]
+    y = np.array(df1['interaction_binary'])
+    
+    X = pd.DataFrame.to_numpy(X)
+    
+    numbers = np.arange(0.05, 1, 0.05)  # start, stop, step (doesn't include end point)
+    
+    group_kf = GroupKFold(n_splits=3)
+    group_kf.get_n_splits(X, y, groups)
+    
+    for j, (train_index, test_index) in enumerate(group_kf.split(X, y, groups)):
+        
+        df_results = pd.DataFrame()
+        
+        X_train, X_test, y_train, y_test = X[train_index], X[test_index], y[train_index], y[test_index]
+        X_train, y_train = sampler.fit_resample(X_train, y_train)
+        
+        rf_model = clf.fit(X_train, y_train)  # Train the model on training data
+        
+        flscore_all = np.zeros(len(numbers))
+        accuracy_all = np.zeros(len(numbers))
+        recall_all = np.zeros(len(numbers))
+        precision_all = np.zeros(len(numbers))
+    
+        for i, number in enumerate(numbers):
+            
+            print('classes', rf_model.classes_)  # [0 1]
+            
+            predictions = rf_model.predict_proba(X_test)[:, 1]
+           
+            predictions[predictions < number] = 0  
+            predictions[predictions >= number] = 1
+            
+            f1score = f1_score(y_test, predictions, labels=None, pos_label=1)
+            flscore_all[i] = f1score
+            
+            accuracy = accuracy_score(y_test, predictions)
+            accuracy_all[i] = accuracy
+            
+            recall = recall_score(y_test, predictions)
+            recall_all[i] = recall
+            
+            precision = precision_score(y_test, predictions)
+            precision_all[i] = precision
+        
+        df_results['numbers'] = numbers
+        df_results['accuracy'] = accuracy_all
+        df_results['f1_score'] = flscore_all
+        df_results['recall'] = recall_all
+        df_results['precision'] = precision_all
+        df_results.to_csv(path_to_directory % j, index=False)
+
+
+def random_forest_model_probability(data_test, data_train, sampler, clf, path_to_scores, path_to_predictions, probability_threshold, path_to_importances):
+    
+    import pandas as pd
+    import numpy as np
+    from sklearn.metrics import f1_score, accuracy_score, recall_score, precision_score, average_precision_score, confusion_matrix
+    
+    data_test = data_test[data_test.native_or_exotic_h != 'missing']
+    data_train = data_train[data_train.native_or_exotic_h != 'missing']
+    
+    sites = data_test.site_ID.unique()
+    sites = sites.tolist()
+    
+    train_features = data_train[['Axis_1_h', 'Axis_2_h', 'Nov_2010_h', 'Oct_2010_h', 'weight_h', 'host_nd', 'native_or_exotic_h', 'Axis_1_p', 'Axis_2_p', 'Nov_2010_p', 'Oct_2010_p', 'weight_p', 'paras_nd', 'overlap_q']]
+    train_labels = np.array(data_train['interaction_binary'])
+    
+    train_features, train_labels = sampler.fit_resample(train_features, train_labels)
+
+    # train model on training data
+    clf.fit(train_features, train_labels)
+    
+    flscore_all = np.zeros(len(sites))
+    accuracy_all = np.zeros(len(sites))
+    recall_all = np.zeros(len(sites))
+    precision_all = np.zeros(len(sites))
+    average_precision_all = np.zeros(len(sites))
+    tn_all = np.zeros(len(sites))
+    tp_all = np.zeros(len(sites))
+    fp_all = np.zeros(len(sites))
+    fn_all = np.zeros(len(sites))
+     
+    predictions_all = np.zeros(0)
+    sites_all = np.zeros(0)
+    prob_predictions_all = np.zeros(0)
+    test_labels_all = np.zeros(0)
+     
+    paras_web_ID_all = np.zeros(0)
+    lep_web_ID_all = np.zeros(0)
+    interaction_freq_all = np.zeros(0)
+    
+    name_sites_all = np.zeros(0)
+    
+    importance_all = np.zeros(0)
+    sites_importance_all = np.zeros(0)
+    
+    for i, site in enumerate(sites):
+        data_one_site = data_test[data_test.site_ID == site]
+         
+        paras_web_ID = data_one_site['paras_web_ID'].to_numpy()
+        paras_web_ID_all = np.concatenate((paras_web_ID_all, paras_web_ID))
+         
+        lep_web_ID = data_one_site['Lep_web_ID'].to_numpy()
+        lep_web_ID_all = np.concatenate((lep_web_ID_all, lep_web_ID))
+         
+        interaction_freq = data_one_site['interaction_frequency'].to_numpy()
+        interaction_freq_all = np.concatenate((interaction_freq_all, interaction_freq))
+         
+        test_features = data_one_site[['Axis_1_h', 'Axis_2_h', 'Nov_2010_h', 'Oct_2010_h', 'weight_h', 'host_nd', 'native_or_exotic_h', 'Axis_1_p', 'Axis_2_p', 'Nov_2010_p', 'Oct_2010_p', 'weight_p', 'paras_nd', 'overlap_q']]
+        test_labels = np.array(data_one_site['interaction_binary'])
+         
+        prob_predictions = clf.predict_proba(test_features)[:, 1]
+        
+        predictions = clf.predict_proba(test_features)[:, 1]
+        predictions[predictions < probability_threshold] = 0  
+        predictions[predictions >= probability_threshold] = 1
+        
+        f1score = f1_score(test_labels, predictions, labels=None, pos_label=1)
+        flscore_all[i] = f1score
+             
+        accuracy = accuracy_score(test_labels, predictions)
+        accuracy_all[i] = accuracy
+             
+        recall = recall_score(test_labels, predictions)
+        recall_all[i] = recall
+             
+        precision = precision_score(test_labels, predictions)
+        precision_all[i] = precision
+         
+        average_precision = average_precision_score(test_labels, prob_predictions)
+        average_precision_all[i] = average_precision
+         
+        tn, fp, fn, tp = confusion_matrix(test_labels, predictions, labels=[0, 1]).ravel()
+        tn_all[i] = tn
+        fp_all[i] = fp
+        fn_all[i] = fn
+        tp_all[i] = tp
+         
+        predictions_all = np.concatenate((predictions_all, predictions))
+        sites_all = np.concatenate((sites_all, i * np.ones(len(predictions))))
+        prob_predictions_all = np.concatenate((prob_predictions_all, prob_predictions))
+        test_labels_all = np.concatenate((test_labels_all, test_labels))
+        
+        name_sites_all = np.concatenate((name_sites_all, [sites[i]] * (len(predictions))))
+        
+        feature_list = list(test_features)
+        
+        importance_all = np.concatenate((importance_all, clf.feature_importances_))
+        sites_importance_all = np.concatenate((sites_importance_all, [sites[i]] * (len(feature_list))))
+    
+    df_importance = pd.DataFrame()
+    df_importance['feature'] = feature_list * (len(sites))
+    df_importance['importance'] = importance_all
+    df_importance['site_id'] = sites_importance_all
+    df_importance.to_csv(path_to_importances, index=False)
+    
+    df_scores = pd.DataFrame()
+    df_scores['sites'] = sites
+    df_scores['accuracy'] = accuracy_all
+    df_scores['f1_score'] = flscore_all
+    df_scores['recall'] = recall_all
+    df_scores['precision'] = precision_all
+    df_scores['average_precision'] = average_precision_all
+    df_scores['tn'] = tn_all 
+    df_scores['fp'] = fp_all 
+    df_scores['fn'] = fn_all 
+    df_scores['tp'] = tp_all
+    df_scores.to_csv(path_to_scores, index=False)
+    
+    df_predictions = pd.DataFrame()
+    df_predictions['site_id'] = sites_all
+    df_predictions['true_binary_value'] = test_labels_all
+    df_predictions['predicted_binary_value'] = predictions_all
+    df_predictions['probability'] = prob_predictions_all
+    df_predictions['paras_web_ID'] = paras_web_ID_all
+    df_predictions['Lep_web_ID'] = lep_web_ID_all
+    df_predictions['true_interaction_freq'] = interaction_freq_all
+    df_predictions['name_site_id'] = name_sites_all
+    df_predictions.to_csv(path_to_predictions, index=False)
+    
