@@ -1,0 +1,397 @@
+# Indirect effects (random forest, dij from training data)
+
+library(MuMIn)
+
+hosts_to_remove <- c('Psychidae.4.spots', 'Psychidae.other', 'Psychidae.sp2', 'Strepsicrates.sp', 
+                     'Psychidae', 'Strepsicrates.sp', 'Stathmopoda.sp.chocolate', 'Archipini.sp') 
+# removing these hosts since biogeographic trait missing for these hosts
+
+# packages etc ----
+
+library(piecewiseSEM)
+library(lme4)
+library(stringi)
+library(tibble)
+library(dplyr)
+library(reshape2)
+library(mefa)
+library(MuMIn)
+library(influence.ME)
+reshape2::dcast
+reshape2::melt
+dplyr::rename
+
+source("C:/Users/hania/Desktop/project/r_projects/project2_ac/code/ac_functions_different.R")
+source("C:/Users/hania/Desktop/project/r_functions/Bolker_etal_2009_Tree_sm/mmc3.R")
+source("C:/Users/hania/Desktop/project/r_functions/over_dispersion_function.R")
+source("C:/Users/hania/Desktop/project/r_projects/glm_knn/code/new/function_print.R")
+source("C:/Users/hania/Desktop/analyses/oct1/code/indirect_effects/outlier_function.R")
+
+# data_rf: df with columns: "name_site_id" (eg. 47_EH_N), "Lep_web_ID" (eg. Austrocidaria_sp),"paras_web_ID" (eg. Aleiodes_sp), "probability"
+# each row is a h-p interaction. (This is for the function: "format_f")
+
+format_f <- function(data_rf, abundance_CF, CF_all_final, data_CF, data_dij){
+  
+  # ALPHA - total attacks on host sp from validation time step one data, by site, trt
+  
+  data_rf$name_site_id <- ifelse(nchar(data_rf$name_site_id) == 6, paste0("0", data_rf$name_site_id), data_rf$name_site_id)
+  
+  site_numbers <- unique(data_rf$name_site_id) # this doesn't include sites at which no hosts were parasitized
+  
+  list_df <- list()
+  
+  for (i in seq_along(site_numbers)){
+    
+    df <- data_rf[(data_rf$name_site_id == site_numbers[i]), ]
+    
+    # convert to interaction matrix
+    
+    df <- df[ , c("Lep_web_ID","paras_web_ID", "probability")]
+    
+    df$probability <- as.numeric(df$probability)
+    
+    df <- dcast(df, Lep_web_ID ~ paras_web_ID, value.var="probability", drop=FALSE)
+    
+    df[is.na(df)] <- 0
+    
+    df$site_id <- rep(site_numbers[i], nrow(df))
+    
+    list_df[[paste0("", site_numbers[i])]] <- df 
+    
+    # for each iteration of the loop one df created which is then added to the list (list_df).
+    
+  }
+  
+  # ABUNDANCE
+  
+  abundance_CF$site_id <- paste(abundance_CF$site, abundance_CF$trt, abundance_CF$forest, sep="_")
+  
+  abundance_CF_before <- abundance_f(df=abundance_CF, collection_val=c(1,2,3), extra_val=c("N"))
+  
+  abundance_CF_after <- abundance_f(df=abundance_CF, collection_val=c(4,5), extra_val=c("N"))
+  
+  abundance_CF_after_with_extras <- abundance_f(df=abundance_CF, collection_val=c(4,5), extra_val=c("N","Y"))
+  
+  colnames(abundance_CF_before)[colnames(abundance_CF_before) == "number_hosts"] <- "N_before"
+  colnames(abundance_CF_after)[colnames(abundance_CF_after) == "number_hosts"] <- "N_after"
+  colnames(abundance_CF_after_with_extras)[colnames(abundance_CF_after_with_extras) == "number_hosts"] <- "N_after_extra"
+  
+  abundance_df <- merge(abundance_CF_before, abundance_CF_after, by=c("Lep.web.ID", "site_id"), all=TRUE)
+  abundance_df <- merge(abundance_df, abundance_CF_after_with_extras, by=c("Lep.web.ID", "site_id"), all=TRUE)
+  
+  abundance_df[is.na(abundance_df)] <- 0
+  
+  abundance_df$site_id <- ifelse(nchar(abundance_df$site_id)==6, paste0("0", abundance_df$site_id), abundance_df$site_id)
+  
+  abundance_df$Lep.web.ID <- gsub("\\.", "_", abundance_df$Lep.web.ID)
+  
+  colnames(abundance_df)[colnames(abundance_df)=="Lep.web.ID"] <- "Lep_web_ID"
+  
+  # formatting list_df
+  list_df <- lapply(list_df, function(k){rownames(k) <- k$Lep_web_ID ; k})
+  list_df <- lapply(list_df, function(k){k$a <- c(1:nrow(k)); k})
+  
+  list_df <- lapply(list_df, function(k){k <- k[ ,!(names(k) %in% c("Lep_web_ID", "site_id"))] ; k})
+  list_df <- lapply(list_df, function(k){k <- as.data.frame(t(k)) ; k})
+  list_df <- Map(cbind, list_df, site_ID = (names(list_df)))
+  list_df <- lapply(list_df, function(k){k <- cbind(paras_web_ID = rownames(k), k) ; k})
+  
+  # CF_all_final
+  
+  CF_all_final <- CF_all_final[, c("paras_web_ID", "site_ID", "combined_abundance_p")]
+  CF_all_final <- distinct(CF_all_final)
+  CF_all_final$site_ID <- ifelse(nchar(CF_all_final$site_ID)==6, paste0("0", CF_all_final$site_ID), CF_all_final$site_ID)
+  
+  list_df <- lapply(list_df, function(k){k$sum <- rowSums(k[ ,!(names(k) %in% c("paras_web_ID", "site_ID"))]) ; k})
+  list_df <- lapply(list_df, function(k){k <- merge(k, CF_all_final, by=c("paras_web_ID", "site_ID"), all.x=TRUE) ; k})
+  
+  list_df <- lapply(list_df, function(k){k[is.na(k)] <- 1 ; k})
+  
+  column_list = c("sum", "combined_abundance_p", "site_ID", "paras_web_ID") # this is all columns expect para sp. 
+  list_df <- lapply(list_df, function(k){k <- cbind(k[column_list], k[!(names(k) %in% column_list)]/k$sum*k$combined_abundance_p) ; k})
+  # this divides each column (except those in column_list) by 'sum' and multiples it by combined_abundance
+  
+  list_df <- lapply(list_df, function(k){rownames(k) <- k$paras_web_ID ; k})
+  list_df <- lapply(list_df, function(k){k <- k[ ,!(names(k) %in% column_list)] ; k})
+  list_df <- lapply(list_df, function(k){k <- as.data.frame(t(k)) ; k})
+  
+  list_df <- lapply(list_df, function(k){k$a <- rep(0, nrow(k)) ; k}) # a=0, since can't take row sum of df with one column
+  
+  list_df <- lapply(list_df, function(k) {k$alpha <- rowSums(k); k})
+  list_df <- lapply(list_df, function(k){k <- cbind(Lep.web.ID = rownames(k), k) ; k})
+  list_df <- lapply(list_df, function(k) {k <- k[ , c("Lep.web.ID","alpha")] ; k})
+  list_df <- lapply(list_df, function(k){k$Lep.web.ID <- as.character(k$Lep.web.ID) ; k})
+  list_df <- bind_rows(list_df, .id='site_id') # bind_rows() is from dplyr
+  
+  data_CF <- merge(data_CF, data_dij, by=c("sp_i_h", "sp_j_h"), all.x=TRUE)
+  
+  abundance_df$lep_site_id <- paste(abundance_df$Lep_web_ID, abundance_df$site_id, sep="_")
+  abundance_df$Lep_web_ID <- NULL
+  abundance_df$site_id <- NULL
+  
+  abundance_df$n_j_B_after <- abundance_df$N_after
+  
+  colnames(abundance_df)[colnames(abundance_df)=="N_after_extra"] <- "n_i_A_after_extra"
+  colnames(abundance_df)[colnames(abundance_df)=="N_before"] <- "n_j_B_before"
+  
+  to_merge_i <- abundance_df[ , c("n_i_A_after_extra", "lep_site_id")]
+  to_merge_j <- abundance_df[ , c("n_j_B_before", "n_j_B_after", "lep_site_id")]
+  
+  data_CF <- merge(data_CF, to_merge_i, by.x= "sp_i", by.y="lep_site_id", all.x=TRUE)
+  data_CF <- merge(data_CF, to_merge_j, by.x="sp_j", by.y="lep_site_id", all.x=TRUE)
+  
+  data_CF$sp_i_h <- NULL
+  data_CF$sp_j_h <- NULL
+  
+  list_df$sp_i <- paste(list_df$Lep.web.ID, list_df$site_id, sep="_")
+  list_df$Lep.web.ID <- NULL
+  list_df$site_id <- NULL
+  
+  colnames(list_df)[colnames(list_df)=="alpha"] <- "alpha_i_A_before" 
+  
+  data_CF <- merge(data_CF, list_df, by="sp_i", all.x=TRUE)
+  
+  data_CF[is.na(data_CF)] <- 0
+  
+  return_list <- list()
+  return_list[[1]] <- data_CF
+  return_list[[2]] <- abundance_df
+  
+  return(return_list)
+}
+
+get_observed_rate_f <- function(data_exp, alpha_df, abundance_df){
+  
+  df <- merge(data_exp, alpha_df, by.x="all_sp_i", by.y="lep_site_id", all.x=TRUE)
+  
+  df[is.na(df)] <- 0
+  
+  df <- merge(df, abundance_df[ ,c("lep_site_id", "n_i_A_after_extra")], by.x="all_sp_i", by.y="lep_site_id", all.x=TRUE)
+  
+  colnames(df)[colnames(df) == "n_i_A_after_extra"] <- "N_after_extra"
+  
+  df$all_O <- df$alpha_after/df$N_after_extra
+  
+  df$all_O_binary <- ifelse(df$all_O !=0, 1, 0)
+  df$log_E <- log(df$all_E) # log() is log base e
+  
+  df$forest <- stri_sub(df$all_sp_i,-1,-1)
+  df$block <- stri_sub(df$all_sp_i,-7,-6)
+  df$trt <- stri_sub(df$all_sp_i,-4,-3)
+  
+  df$block_trt <- paste(df$block, df$trt, sep="_")
+  df$trt_forest <- paste(df$trt, df$forest, sep="_")
+  df$block_trt_forest <- paste(df$block, df$trt, df$forest, sep="_")
+  
+  return(df)
+}
+
+# list of all host-host pairs at time step 1 validation sites ----
+
+setwd("C:/Users/hania/Desktop/project/Carol&Lupe_data/Data_CF")
+
+data_CF <- read.table("catalogue.extras.adults.csv", header=T,row.names=NULL,sep=",", fileEncoding = "UTF-8-BOM", 
+                      stringsAsFactors = FALSE)
+data_CF <- data_CF[!(data_CF$Lep.web.ID %in% hosts_to_remove), ]
+
+data_CF <- data_CF[is.element(data_CF$collection, c(1,2,3)), ] # time step 1
+data_CF <- data_CF[ , c("Lep.web.ID", "site", "trt", "forest")]
+data_CF <- distinct(data_CF)
+data_CF$site <- ifelse(nchar(data_CF$site)==1, paste0("0", data_CF$site), data_CF$site)
+data_CF$lep_forest_site_trt <- paste(data_CF$Lep.web.ID, data_CF$site, data_CF$trt, data_CF$forest, sep="_")
+data_CF <- expand.grid(data_CF$lep_forest_site_trt, data_CF$lep_forest_site_trt, stringsAsFactors = FALSE)
+
+colnames(data_CF)[colnames(data_CF)=="Var1"] <- "sp_i"
+colnames(data_CF)[colnames(data_CF)=="Var2"] <- "sp_j"
+
+data_CF$sp_i_h <- gsub('.{8}$', '', data_CF$sp_i) # create new column by removing last 8 characters from data_CF$sp_i_h
+data_CF$sp_j_h <- gsub('.{8}$', '', data_CF$sp_j)
+
+data_CF <- as.data.frame(apply(data_CF, 2, function(y) (gsub("\\.", "_", y))))
+
+data_CF$i_h <- stri_sub(data_CF$sp_i,-1,-1)
+data_CF$j_h <- stri_sub(data_CF$sp_j,-1,-1)
+data_CF$sp_i_h <- paste(data_CF$sp_i_h, data_CF$i_h, sep="_")
+data_CF$sp_j_h <- paste(data_CF$sp_j_h, data_CF$j_h, sep="_")
+data_CF$i_h <- NULL
+data_CF$j_h <- NULL
+
+# alpha_after ----
+
+setwd("C:/Users/hania/Desktop/project/Carol&Lupe_data/Data_CF")
+data_carol <- read.table("catalogue.extras.adults.csv", header=T,row.names=NULL,sep=",", 
+                         fileEncoding = "UTF-8-BOM", stringsAsFactors = FALSE)
+
+data_carol <- data_carol[!(data_carol$Lep.web.ID %in% hosts_to_remove), ]
+
+data_carol$number.paras <- ifelse(data_carol$paras.web.ID == "Nematoda", 0, data_carol$number.paras)
+data_carol$numb.paras.events <- ifelse(data_carol$paras.web.ID == "Nematoda", 0, data_carol$numb.paras.events)
+data_carol$paras.web.ID <- ifelse(data_carol$paras.web.ID == "Nematoda", "unparasitized", data_carol$paras.web.ID)
+data_carol$paras.family <- ifelse(data_carol$paras.family == "Nematoda", "unparasitized", data_carol$paras.family)
+
+data_carol$site <- as.character(data_carol$site)
+data_carol$site <- ifelse(nchar(data_carol$site)==1, paste("0", data_carol$site, sep=""), 
+                          data_carol$site)
+
+data_carol <- data_carol[(data_carol$collection != 6), ] # collection 6 is March, Carol Frost didn't use this data
+data_carol <- data_carol[(data_carol$numb.paras.events !=0),]
+data_carol$site_id <- paste(data_carol$site, data_carol$trt, data_carol$forest, data_carol$b_a, sep="_") 
+site_numbers_a <- unique(data_carol$site_id) # only includes sites at which at least one host was parasitized.
+
+alpha_df <- list()
+
+# this loop creates a host_paras interaciton matrix for each site-trt-forest-time step combination
+# 8*2*2*2=64 interaction matrices. (8 sites, 2 treatments, 2 forest types, 2 timesteps).
+
+for (i in seq_along(site_numbers_a)){
+  
+  df <- data_carol[(data_carol$site_id == site_numbers_a[i]), ]
+  
+  # convert to interaction matrix
+  
+  df <- df[ , c("Lep.web.ID","paras.web.ID", "numb.paras.events")]
+  
+  df <- aggregate(numb.paras.events ~ Lep.web.ID+paras.web.ID, df, sum)
+  
+  df <- dcast(df, Lep.web.ID ~ paras.web.ID, value.var="numb.paras.events", drop=FALSE)
+  
+  df[is.na(df)] <- 0
+  
+  alpha_df[[paste0("site", site_numbers_a[i])]] <- df 
+  
+  # for each iteration of the loop one df created which is then added to the list (alpha_df).
+  
+}
+alpha_df <- lapply(alpha_df, function(k) {k$alpha <- rowSums(k[-1]); k})
+# adds column called 'alpha' with row sum to each df in alpha_df.
+# k[-1] drops the first column (Lep.web.ID) in each df before calculating the row sum. 
+
+alpha_df <- lapply(alpha_df, function(k) {k <- k[ , c("Lep.web.ID","alpha")] ; k}) # subset each df in list
+alpha_df <- bind_rows(alpha_df, .id='site_id') # bind_rows() is from dplyr
+
+alpha_df$site_id <- substring(alpha_df$site_id, 5) # eg. site39_EC_P to 39_EC_P
+alpha_df$site_id <- ifelse(nchar(alpha_df$site_id)==8, paste0("0", alpha_df$site_id), alpha_df$site_id)
+alpha_df$before_after <- substring(alpha_df$site_id, 9)
+
+alpha_df$site_id <- gsub('.{2}$', '', alpha_df$site_id) # removes last two characters 
+
+alpha_df <- dcast(alpha_df, Lep.web.ID+site_id ~ before_after, value.var="alpha", drop=FALSE)
+alpha_df[is.na(alpha_df)] <- 0
+
+colnames(alpha_df)[colnames(alpha_df)=="B"] <- "alpha_before"
+colnames(alpha_df)[colnames(alpha_df)=="A"] <- "alpha_after"
+
+alpha_df$Lep.web.ID <- gsub("\\.", "_", alpha_df$Lep.web.ID)
+alpha_df$lep_site_id <- paste(alpha_df$Lep.web.ID, alpha_df$site_id, sep="_")
+alpha_df <- alpha_df[ , c("lep_site_id", "alpha_after")]
+alpha_df <- distinct(alpha_df)
+
+rm(df,data_carol)
+
+# read in data ----
+
+setwd("C:/Users/hania/Desktop/rf_no_abundance/from_py/results_rf")
+data_rf <- read.table("a_predictions.csv",header=T,row.names=NULL,sep=",", fileEncoding = "UTF-8-BOM", 
+                      stringsAsFactors = FALSE)
+
+setwd("C:/Users/hania/Desktop/project/Carol&Lupe_data/Data_CF")
+abundance_CF <- read.table("catalogue.extras.adults.csv", header=T,row.names=NULL,sep=",", fileEncoding = "UTF-8-BOM", stringsAsFactors = FALSE)
+abundance_CF <- abundance_CF[(abundance_CF$collection != 6), ] # This is for data collected in March, which Frost et al. didn't use
+
+abundance_CF$number.paras <- ifelse(abundance_CF$paras.web.ID == "Nematoda", 0, abundance_CF$number.paras)
+abundance_CF$numb.paras.events <- ifelse(abundance_CF$paras.web.ID == "Nematoda", 0, abundance_CF$numb.paras.events)
+abundance_CF$paras.web.ID <- ifelse(abundance_CF$paras.web.ID == "Nematoda", "unparasitized", abundance_CF$paras.web.ID)
+abundance_CF$paras.family <- ifelse(abundance_CF$paras.family == "Nematoda", "unparasitized", abundance_CF$paras.family)
+
+abundance_CF$site <- as.character(abundance_CF$site)
+abundance_CF$site <- ifelse(nchar(abundance_CF$site)==1, paste("0", abundance_CF$site, sep=""), 
+                            abundance_CF$site)
+
+
+setwd("C:/Users/hania/Desktop/analyses/oct1/from_r")
+CF_all_final <- read.table("CF_all_final.csv", header=T,row.names=NULL,sep=",", fileEncoding = "UTF-8-BOM", 
+                           stringsAsFactors = FALSE)
+
+# dij
+setwd("C:/Users/hania/Desktop/project/r_projects/project2_ac/dij_23")
+
+# dij from Lupe's sites (training sites)
+dij_gp <- read.table("dij_lupe_data_nh.csv",header=T, row.names=NULL, sep=",", 
+                     fileEncoding = "UTF-8-BOM", stringsAsFactors = FALSE)
+
+colnames(dij_gp)[colnames(dij_gp) == "sp.i"] <- "sp_i"
+colnames(dij_gp)[colnames(dij_gp) == "sp.j"] <- "sp_j"
+
+x <- nrow(dij_gp)
+
+dij_gp <- rep(dij_gp, 4)
+
+dij_gp$h_i <- c(rep("N", 2*x), rep("P", 2*x))
+dij_gp$h_j <- c(rep("N",x), rep("P", 2*x), rep("N", x))
+
+dij_gp$sp_i_h <- paste(dij_gp$sp_i, dij_gp$h_i, sep="_")
+dij_gp$sp_j_h <- paste(dij_gp$sp_j, dij_gp$h_j, sep="_")
+dij_gp <- dij_gp[ , c("sp_i_h", "sp_j_h", "dijt")]
+dij_gp$sp_i_h <- gsub("\\.", "_", dij_gp$sp_i_h)
+dij_gp$sp_j_h <- gsub("\\.", "_", dij_gp$sp_j_h)
+
+# use functions ----
+
+# 1 dij_gp
+list_from_function <- format_f(data_rf=data_rf, abundance_CF=abundance_CF, CF_all_final=CF_all_final, data_CF=data_CF,
+                               data_dij=dij_gp)
+
+final_rf_combined_nh <- list_from_function[[1]]
+abundance_df <- list_from_function[[2]]
+
+final_rf_combined_nh <- final_rf_combined_nh[!(final_rf_combined_nh$n_i_A_after_extra == 0 | final_rf_combined_nh$n_j_B_before ==0), ]
+# since can't divide by zero (see equation 3)
+# Also, only calculating E (expected parasitism rate) for host sp found at time step 2 so n_i_A_after_extra == 0
+
+sp_i_list <- as.character(unique(final_rf_combined_nh$sp_i))
+
+final_rf_combined_nh <- expected_attacks_f(df1=final_rf_combined_nh, sp_i_list=sp_i_list)
+
+final_rf_combined_nh <- get_observed_rate_f(data_exp=final_rf_combined_nh, alpha_df=alpha_df, abundance_df=abundance_df)
+
+# outliers ----
+
+options(na.action = "na.fail")
+
+final_rf_combined_nh <- final_rf_combined_nh[!(final_rf_combined_nh$block_trt_forest %in% 
+                                                 c("17_EC_N", "17_EH_N", "46_EC_P")), ] # these 3 sites - no parasitoids emerged from any of the host species
+
+# to csv
+# write.csv(final_rf_combined_nh, "C:/Users/hania/Desktop/rf_no_abundance/from_r/rf_dij_from_training_host_sp_list.csv",
+#           row.names=FALSE)
+
+outliers_df <- find_outliers(mydata=final_rf_combined_nh, n_model_parameters=2)
+
+# remove outliers
+final_rf_combined_nh <- final_rf_combined_nh[final_rf_combined_nh$all_E!=max(final_rf_combined_nh$all_E), ]
+final_rf_combined_nh <- final_rf_combined_nh[final_rf_combined_nh$all_E!=max(final_rf_combined_nh$all_E), ]
+final_rf_combined_nh <- final_rf_combined_nh[final_rf_combined_nh$all_E!=max(final_rf_combined_nh$all_E), ]
+
+# model selection ----
+
+final_rf_combined_nh$all_E_sc <- scale(final_rf_combined_nh$all_E, center=TRUE, scale=TRUE)
+
+response <- cbind(final_rf_combined_nh$alpha_after, final_rf_combined_nh$N_after_extra)
+m1_a <- glmer(response ~ all_E_sc + (1|block_trt_forest), family=binomial,data=final_rf_combined_nh)
+overdisp_fun(m1_a)
+
+m1_b <- glm(response ~ all_E_sc, family=binomial,data=final_rf_combined_nh)
+AIC(m1_a, m1_b) # a better
+AICc(m1_a, m1_b) # a better
+
+m_from_dredge <- dredge(m1_a)
+print(m_from_dredge)
+
+m_from_dredge_aic <- dredge(m1_a, rank="AIC")
+print(m_from_dredge_aic) # same as AICc
+
+m1_best <- m1_a
+
+source("C:/Users/hania/Desktop/analyses/ms_thesis/code/linear_models/functions_linear_models.R")
+print_metrics(my_model=m1_best)
+summary(m1_best)
