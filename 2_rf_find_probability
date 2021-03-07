@@ -1,0 +1,17 @@
+# RF. Find best probability threshold for 'combined' random-forest model, using training data (Lupe's data)
+
+import os
+import pandas as pd
+from imblearn.over_sampling import RandomOverSampler
+from sklearn.ensemble import RandomForestClassifier
+from my_functions import probability_search
+
+path_to_file = 'C:/Users/hania/Desktop/analyses/oct1/from_r'
+data_GP = pd.read_csv(os.path.join(path_to_file, 'GP_all_final.csv'))
+
+data_GP = data_GP.rename(columns={'host_nd_all' : 'host_nd', 'paras_nd_all' : 'paras_nd'})
+
+probability_search(df=data_GP, path_to_directory='C:/Users/hania/Desktop/rf_no_abundance/from_py/probability_search_rf/combined_model/probability_search_%d.csv',
+                   sampler=RandomOverSampler(random_state=11), clf=RandomForestClassifier(n_estimators=944, min_samples_split=8, min_samples_leaf=12, max_features='log2',
+                                                                                          max_depth=16, criterion='gini', class_weight=None, random_state=101))
+# parameters for clf and sampling method were found in 1_rf_find_settings
